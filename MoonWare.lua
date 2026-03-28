@@ -15,7 +15,7 @@ local scaleFactor = math.min(screenSize.X / 800, screenSize.Y / 600, 1.2)
 local CONFIG = {
     FLING_POWER = 9e7,
     ROTATION_POWER = 9e8,
-    FLING_DURATION = 1.5,
+    FLING_DURATION = 2,
     UPDATE_INTERVAL = 0.1,
     SAFE_MODE = true,
     AUTO_KILLER_FLING = false
@@ -583,14 +583,28 @@ local function FlingTarget(targetPlayer)
         local targetHumanoid = targetChar:FindFirstChildOfClass("Humanoid")
         if not targetHumanoid or targetHumanoid.Health <= 0 then return false end
         
+        if rootPart.Velocity.Magnitude < 50 then
+            getgenv().OldPos = rootPart.CFrame
+        end
+        
+        if targetHumanoid.Sit then
+            return false
+        end
+        
         local targetRoot = targetHumanoid.RootPart
-        if not targetRoot then return false end
+        local targetHead = targetChar:FindFirstChild("Head")
+        local accessory = targetChar:FindFirstChildOfClass("Accessory")
+        local handle = accessory and accessory:FindFirstChild("Handle")
+        
+        local targetPart = targetRoot or targetHead or handle
+        if not targetPart then
+            return false
+        end
         
         if not OriginalCameraSubject then
             OriginalCameraSubject = workspace.CurrentCamera.CameraSubject
         end
-        
-        workspace.CurrentCamera.CameraSubject = targetHumanoid
+        workspace.CurrentCamera.CameraSubject = targetPart
         
         local originalSeatState = humanoid.Sit
         humanoid.Sit = false
@@ -599,7 +613,7 @@ local function FlingTarget(targetPlayer)
         local originalPos = rootPart.CFrame
         
         local bodyVelocity = Instance.new("BodyVelocity")
-        bodyVelocity.Velocity = Vector3.new(CONFIG.FLING_POWER, CONFIG.FLING_POWER * 2, CONFIG.FLING_POWER)
+        bodyVelocity.Velocity = Vector3.new(CONFIG.FLING_POWER, CONFIG.FLING_POWER * 10, CONFIG.FLING_POWER)
         bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
         bodyVelocity.Parent = rootPart
         
@@ -608,48 +622,70 @@ local function FlingTarget(targetPlayer)
         bodyAngularVelocity.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
         bodyAngularVelocity.Parent = rootPart
         
-        local attachment = Instance.new("Attachment")
-        attachment.Parent = targetRoot
-        
-        local alignPosition = Instance.new("AlignPosition")
-        alignPosition.Parent = rootPart
-        alignPosition.Attachment0 = rootPart:FindFirstChildOfClass("Attachment") or Instance.new("Attachment", rootPart)
-        alignPosition.Attachment1 = attachment
-        alignPosition.RigidityEnabled = true
-        alignPosition.MaxForce = 9e9
-        alignPosition.MaxVelocity = 9e9
+        local function flingPosition(basePart, pos, ang)
+            rootPart.CFrame = CFrame.new(basePart.Position) * pos * ang
+            character:SetPrimaryPartCFrame(CFrame.new(basePart.Position) * pos * ang)
+            bodyVelocity.Velocity = Vector3.new(CONFIG.FLING_POWER, CONFIG.FLING_POWER * 10, CONFIG.FLING_POWER)
+            bodyAngularVelocity.AngularVelocity = Vector3.new(CONFIG.ROTATION_POWER, CONFIG.ROTATION_POWER, CONFIG.ROTATION_POWER)
+        end
         
         local startTime = tick()
         local angle = 0
         
         while FlingActive and tick() - startTime < CONFIG.FLING_DURATION do
-            if not rootPart.Parent or not targetRoot.Parent then break end
+            if not rootPart.Parent or not targetPart.Parent then break end
             
-            angle = angle + 100
-            
-            rootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 1.5, 0) * CFrame.Angles(math.rad(angle), 0, 0)
-            character:SetPrimaryPartCFrame(rootPart.CFrame)
-            
-            bodyVelocity.Velocity = Vector3.new(CONFIG.FLING_POWER, CONFIG.FLING_POWER * 2, CONFIG.FLING_POWER)
-            bodyAngularVelocity.AngularVelocity = Vector3.new(CONFIG.ROTATION_POWER, CONFIG.ROTATION_POWER, CONFIG.ROTATION_POWER)
-            
-            task.wait()
+            if targetPart.Velocity.Magnitude < 50 then
+                angle = angle + 100
+                
+                flingPosition(targetPart, CFrame.new(0, 1.5, 0) + (targetHumanoid.MoveDirection * targetPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                flingPosition(targetPart, CFrame.new(0, -1.5, 0) + (targetHumanoid.MoveDirection * targetPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                flingPosition(targetPart, CFrame.new(0, 1.5, 0) + (targetHumanoid.MoveDirection * targetPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                flingPosition(targetPart, CFrame.new(0, -1.5, 0) + (targetHumanoid.MoveDirection * targetPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                flingPosition(targetPart, CFrame.new(0, 1.5, 0) + targetHumanoid.MoveDirection, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                flingPosition(targetPart, CFrame.new(0, -1.5, 0) + targetHumanoid.MoveDirection, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+            else
+                flingPosition(targetPart, CFrame.new(0, 1.5, targetHumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                flingPosition(targetPart, CFrame.new(0, -1.5, -targetHumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                task.wait()
+                flingPosition(targetPart, CFrame.new(0, 1.5, targetHumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                flingPosition(targetPart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                flingPosition(targetPart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                task.wait()
+            end
         end
         
-        alignPosition:Destroy()
-        attachment:Destroy()
         bodyVelocity:Destroy()
         bodyAngularVelocity:Destroy()
         
         humanoid.Sit = originalSeatState
         humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
         
-        local returnTime = tick()
-        while tick() - returnTime < 0.5 do
-            rootPart.CFrame = originalPos * CFrame.new(0, 0.5, 0)
-            character:SetPrimaryPartCFrame(rootPart.CFrame)
-            humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-            task.wait()
+        if getgenv().OldPos then
+            local returnTimeout = tick() + 2
+            repeat
+                rootPart.CFrame = getgenv().OldPos * CFrame.new(0, 0.5, 0)
+                character:SetPrimaryPartCFrame(getgenv().OldPos * CFrame.new(0, 0.5, 0))
+                humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+                
+                for _, part in pairs(character:GetChildren()) do
+                    if part:IsA("BasePart") then
+                        part.Velocity = Vector3.new()
+                        part.RotVelocity = Vector3.new()
+                    end
+                end
+                
+                task.wait()
+            until (rootPart.Position - getgenv().OldPos.Position).Magnitude < 25 or tick() > returnTimeout
         end
         
         if OriginalCameraSubject then
@@ -685,11 +721,11 @@ local function StartFling()
     
     FlingActive = true
     UpdateStatus()
-    Notify("MoonWare", "🌙 Flinging " .. count .. " targets", 2)
+    Notify("MoonWare", "🚀 Flinging " .. count .. " targets", 2)
     
     if CONFIG.SAFE_MODE then
         OriginalFPDH = workspace.FallenPartsDestroyHeight
-        workspace.FallenPartsDestroyHeight = -9e9
+        workspace.FallenPartsDestroyHeight = 9e9
     end
     
     FlingLoop = task.spawn(function()
@@ -710,6 +746,7 @@ local function StartFling()
                         table.insert(targets, player)
                     end
                 end
+                RefreshPlayerList()
             end
             
             for _, target in ipairs(targets) do

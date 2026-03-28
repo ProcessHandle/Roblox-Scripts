@@ -1,438 +1,467 @@
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 local StarterGui = game:GetService("StarterGui")
 local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local Player = Players.LocalPlayer
 assert(Player, "Failed to get LocalPlayer")
 
-local function Notify(title, text)
-    local success, err = pcall(function()
+local CONFIG = {
+    FLING_POWER = 9e7,
+    ROTATION_POWER = 9e8,
+    FLING_DURATION = 1.5,
+    UPDATE_INTERVAL = 0.1,
+    SAFE_MODE = true
+}
+
+local function Notify(title, text, duration)
+    pcall(function()
         StarterGui:SetCore("SendNotification", {
-            Title = tostring(title),
-            Text = tostring(text),
-            Duration = 2
+            Title = title,
+            Text = text,
+            Duration = duration or 3
         })
     end)
-    if not success then
-        print("Notify error:", err)
-    end
 end
 
-local ScreenGui
-local _, err = pcall(function()
-    ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "MoonWareGUI"
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.Parent = CoreGui
+local function safeCreate(class, parent, properties)
+    local instance = Instance.new(class)
+    for prop, value in pairs(properties or {}) do
+        pcall(function()
+            instance[prop] = value
+        end)
+    end
+    if parent then
+        instance.Parent = parent
+    end
+    return instance
+end
+
+local function addCorner(instance, radius)
+    pcall(function()
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, radius)
+        corner.Parent = instance
+    end)
+end
+
+local function addStroke(instance, color, thickness, transparency)
+    pcall(function()
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = color
+        stroke.Thickness = thickness
+        stroke.Transparency = transparency or 0
+        stroke.Parent = instance
+    end)
+end
+
+local ScreenGui = safeCreate("ScreenGui", CoreGui, {
+    Name = "aask2gfa12sdasdk12r12dak12j2kal2m9fs74k12sfbn46z",
+    ResetOnSpawn = false
+})
+
+if not ScreenGui then
+    Notify("MoonWare Error", "Failed to create GUI", 5)
+    return
+end
+
+local MainFrame = safeCreate("Frame", ScreenGui, {
+    Size = UDim2.new(0, 380, 0, 520),
+    Position = UDim2.new(0.5, -190, 0.5, -260),
+    BackgroundColor3 = Color3.fromRGB(20, 15, 25),
+    BackgroundTransparency = 0.05,
+    BorderSizePixel = 0,
+    ClipsDescendants = true,
+    Active = true,
+    Draggable = true
+})
+
+addCorner(MainFrame, 12)
+addStroke(MainFrame, Color3.fromRGB(200, 160, 80), 1, 0.3)
+
+local dragStart, startPos
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
 end)
 
-assert(ScreenGui, "Failed to create GUI: " .. tostring(err))
-
--- Main Frame
-local MainFrame
-_, err = pcall(function()
-    MainFrame = Instance.new("Frame")
-    MainFrame.Size = UDim2.new(0, 300, 0, 380)
-    MainFrame.Position = UDim2.new(0.5, -150, 0.5, -190)
-    MainFrame.BackgroundColor3 = Color3.new(0.08, 0.05, 0.12)
-    MainFrame.BackgroundTransparency = 0.15
-    MainFrame.BorderSizePixel = 0
-    MainFrame.Parent = ScreenGui
-end)
-assert(MainFrame, "Failed to create MainFrame: " .. tostring(err))
-
-pcall(function()
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
-    corner.Parent = MainFrame
+UserInputService.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement and dragStart then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
 end)
 
-local TitleBar
-_, err = pcall(function()
-    TitleBar = Instance.new("Frame")
-    TitleBar.Size = UDim2.new(1, 0, 0, 40)
-    TitleBar.BackgroundColor3 = Color3.new(0.12, 0.08, 0.18)
-    TitleBar.BackgroundTransparency = 0.2
-    TitleBar.BorderSizePixel = 0
-    TitleBar.Parent = MainFrame
-end)
-assert(TitleBar, "Failed to create TitleBar")
-
-pcall(function()
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
-    corner.Parent = TitleBar
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragStart = nil
+    end
 end)
 
-local TitleText
-_, err = pcall(function()
-    TitleText = Instance.new("TextLabel")
-    TitleText.Size = UDim2.new(1, -35, 1, 0)
-    TitleText.Position = UDim2.new(0, 12, 0, 0)
-    TitleText.BackgroundTransparency = 1
-    TitleText.Text = "🌙 MoonWare"
-    TitleText.TextColor3 = Color3.new(0.9, 0.7, 0.35)
-    TitleText.Font = Enum.Font.GothamBold
-    TitleText.TextSize = 18
-    TitleText.TextXAlignment = Enum.TextXAlignment.Left
-    TitleText.Parent = TitleBar
-end)
+local TitleBar = safeCreate("Frame", MainFrame, {
+    Size = UDim2.new(1, 0, 0, 50),
+    BackgroundColor3 = Color3.fromRGB(30, 20, 40),
+    BackgroundTransparency = 0.3,
+    BorderSizePixel = 0
+})
 
-local SubtitleText
-pcall(function()
-    SubtitleText = Instance.new("TextLabel")
-    SubtitleText.Size = UDim2.new(1, -35, 1, 0)
-    SubtitleText.Position = UDim2.new(0, 12, 0, 22)
-    SubtitleText.BackgroundTransparency = 1
-    SubtitleText.Text = "multi-target"
-    SubtitleText.TextColor3 = Color3.new(0.7, 0.55, 0.85)
-    SubtitleText.Font = Enum.Font.Gotham
-    SubtitleText.TextSize = 10
-    SubtitleText.TextXAlignment = Enum.TextXAlignment.Left
-    SubtitleText.Parent = TitleBar
-end)
+addCorner(TitleBar, 12)
 
-local CloseButton
-_, err = pcall(function()
-    CloseButton = Instance.new("TextButton")
-    CloseButton.Size = UDim2.new(0, 30, 0, 30)
-    CloseButton.Position = UDim2.new(1, -35, 0, 5)
-    CloseButton.BackgroundTransparency = 1
-    CloseButton.Text = "✕"
-    CloseButton.TextColor3 = Color3.new(0.8, 0.6, 0.4)
-    CloseButton.Font = Enum.Font.GothamBold
-    CloseButton.TextSize = 16
-    CloseButton.Parent = TitleBar
-end)
+local Title = safeCreate("TextLabel", TitleBar, {
+    Size = UDim2.new(1, -50, 1, 0),
+    Position = UDim2.new(0, 15, 0, 0),
+    BackgroundTransparency = 1,
+    Text = "🌙 MoonWare",
+    TextColor3 = Color3.fromRGB(230, 190, 100),
+    Font = Enum.Font.GothamBold,
+    TextSize = 22,
+    TextXAlignment = Enum.TextXAlignment.Left
+})
 
-local StatusFrame
-_, err = pcall(function()
-    StatusFrame = Instance.new("Frame")
-    StatusFrame.Size = UDim2.new(1, -20, 0, 32)
-    StatusFrame.Position = UDim2.new(0, 10, 0, 48)
-    StatusFrame.BackgroundColor3 = Color3.new(0.18, 0.12, 0.22)
-    StatusFrame.BackgroundTransparency = 0.4
-    StatusFrame.BorderSizePixel = 0
-    StatusFrame.Parent = MainFrame
-end)
+local Subtitle = safeCreate("TextLabel", TitleBar, {
+    Size = UDim2.new(1, -50, 1, 0),
+    Position = UDim2.new(0, 15, 0, 28),
+    BackgroundTransparency = 1,
+    Text = "multi-target fling",
+    TextColor3 = Color3.fromRGB(180, 150, 220),
+    Font = Enum.Font.Gotham,
+    TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left
+})
 
-pcall(function()
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = StatusFrame
-end)
+local CloseButton = safeCreate("TextButton", TitleBar, {
+    Position = UDim2.new(1, -40, 0, 0),
+    Size = UDim2.new(0, 40, 0, 50),
+    BackgroundTransparency = 1,
+    Text = "✕",
+    TextColor3 = Color3.fromRGB(200, 160, 100),
+    Font = Enum.Font.GothamBold,
+    TextSize = 20
+})
 
-local StatusLabel
-_, err = pcall(function()
-    StatusLabel = Instance.new("TextLabel")
-    StatusLabel.Size = UDim2.new(1, -15, 1, 0)
-    StatusLabel.Position = UDim2.new(0, 12, 0, 0)
-    StatusLabel.BackgroundTransparency = 1
-    StatusLabel.Text = "0 targets"
-    StatusLabel.TextColor3 = Color3.new(0.85, 0.8, 0.95)
-    StatusLabel.Font = Enum.Font.Gotham
-    StatusLabel.TextSize = 12
-    StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    StatusLabel.Parent = StatusFrame
-end)
+local StatusCard = safeCreate("Frame", MainFrame, {
+    Position = UDim2.new(0, 15, 0, 65),
+    Size = UDim2.new(1, -30, 0, 45),
+    BackgroundColor3 = Color3.fromRGB(40, 30, 50),
+    BackgroundTransparency = 0.5,
+    BorderSizePixel = 0
+})
 
-local ListFrame
-_, err = pcall(function()
-    ListFrame = Instance.new("Frame")
-    ListFrame.Size = UDim2.new(1, -20, 0, 190)
-    ListFrame.Position = UDim2.new(0, 10, 0, 88)
-    ListFrame.BackgroundColor3 = Color3.new(0.12, 0.08, 0.18)
-    ListFrame.BackgroundTransparency = 0.3
-    ListFrame.BorderSizePixel = 0
-    ListFrame.Parent = MainFrame
-end)
+addCorner(StatusCard, 8)
 
-pcall(function()
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = ListFrame
-end)
+local StatusIcon = safeCreate("TextLabel", StatusCard, {
+    Size = UDim2.new(0, 35, 1, 0),
+    BackgroundTransparency = 1,
+    Text = "🎯",
+    TextColor3 = Color3.fromRGB(230, 190, 100),
+    TextSize = 20,
+    Font = Enum.Font.Gotham
+})
 
-local ScrollFrame
-_, err = pcall(function()
-    ScrollFrame = Instance.new("ScrollingFrame")
-    ScrollFrame.Size = UDim2.new(1, -10, 1, -10)
-    ScrollFrame.Position = UDim2.new(0, 5, 0, 5)
-    ScrollFrame.BackgroundTransparency = 1
-    ScrollFrame.BorderSizePixel = 0
-    ScrollFrame.ScrollBarThickness = 3
-    ScrollFrame.Parent = ListFrame
-end)
+local StatusLabel = safeCreate("TextLabel", StatusCard, {
+    Position = UDim2.new(0, 40, 0, 0),
+    Size = UDim2.new(1, -50, 1, 0),
+    BackgroundTransparency = 1,
+    Text = "0 targets selected",
+    TextColor3 = Color3.fromRGB(220, 210, 240),
+    Font = Enum.Font.Gotham,
+    TextSize = 14,
+    TextXAlignment = Enum.TextXAlignment.Left
+})
 
-local ButtonFrame
-_, err = pcall(function()
-    ButtonFrame = Instance.new("Frame")
-    ButtonFrame.Size = UDim2.new(1, -20, 0, 38)
-    ButtonFrame.Position = UDim2.new(0, 10, 0, 286)
-    ButtonFrame.BackgroundTransparency = 1
-    ButtonFrame.Parent = MainFrame
-end)
+local PlayerFrame = safeCreate("Frame", MainFrame, {
+    Position = UDim2.new(0, 15, 0, 120),
+    Size = UDim2.new(1, -30, 0, 280),
+    BackgroundColor3 = Color3.fromRGB(30, 22, 38),
+    BackgroundTransparency = 0.4,
+    BorderSizePixel = 0
+})
 
-local StartButton
-_, err = pcall(function()
-    StartButton = Instance.new("TextButton")
-    StartButton.Size = UDim2.new(0.45, -5, 1, 0)
-    StartButton.Position = UDim2.new(0, 0, 0, 0)
-    StartButton.BackgroundColor3 = Color3.new(0.35, 0.2, 0.5)
-    StartButton.Text = "START"
-    StartButton.TextColor3 = Color3.new(1, 1, 1)
-    StartButton.Font = Enum.Font.GothamBold
-    StartButton.TextSize = 13
-    StartButton.Parent = ButtonFrame
-end)
+addCorner(PlayerFrame, 10)
 
-pcall(function()
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = StartButton
-end)
+local PlayerScroll = safeCreate("ScrollingFrame", PlayerFrame, {
+    Position = UDim2.new(0, 5, 0, 5),
+    Size = UDim2.new(1, -10, 1, -10),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 4,
+    ScrollBarImageColor3 = Color3.fromRGB(200, 160, 80),
+    CanvasSize = UDim2.new(0, 0, 0, 0)
+})
 
--- Stop button
-local StopButton
-_, err = pcall(function()
-    StopButton = Instance.new("TextButton")
-    StopButton.Size = UDim2.new(0.45, -5, 1, 0)
-    StopButton.Position = UDim2.new(0.55, 5, 0, 0)
-    StopButton.BackgroundColor3 = Color3.new(0.25, 0.18, 0.3)
-    StopButton.Text = "STOP"
-    StopButton.TextColor3 = Color3.new(1, 1, 1)
-    StopButton.Font = Enum.Font.GothamBold
-    StopButton.TextSize = 13
-    StopButton.Parent = ButtonFrame
-end)
+local ButtonFrame = safeCreate("Frame", MainFrame, {
+    Position = UDim2.new(0, 15, 0, 410),
+    Size = UDim2.new(1, -30, 0, 50),
+    BackgroundTransparency = 1
+})
 
-pcall(function()
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = StopButton
-end)
+local StartButton = safeCreate("TextButton", ButtonFrame, {
+    Position = UDim2.new(0, 0, 0, 0),
+    Size = UDim2.new(0.45, -5, 1, 0),
+    BackgroundColor3 = Color3.fromRGB(80, 50, 120),
+    BorderSizePixel = 0,
+    Text = "🌙 START FLING",
+    TextColor3 = Color3.fromRGB(255, 255, 255),
+    Font = Enum.Font.GothamBold,
+    TextSize = 14
+})
 
--- Action frame
-local ActionFrame
-_, err = pcall(function()
-    ActionFrame = Instance.new("Frame")
-    ActionFrame.Size = UDim2.new(1, -20, 0, 24)
-    ActionFrame.Position = UDim2.new(0, 10, 0, 330)
-    ActionFrame.BackgroundTransparency = 1
-    ActionFrame.Parent = MainFrame
-end)
+addCorner(StartButton, 8)
 
--- Select all button
-local SelectAllBtn
-_, err = pcall(function()
-    SelectAllBtn = Instance.new("TextButton")
-    SelectAllBtn.Size = UDim2.new(0.45, -5, 1, 0)
-    SelectAllBtn.Position = UDim2.new(0, 0, 0, 0)
-    SelectAllBtn.BackgroundTransparency = 1
-    SelectAllBtn.Text = "SELECT ALL"
-    SelectAllBtn.TextColor3 = Color3.new(0.8, 0.6, 0.4)
-    SelectAllBtn.Font = Enum.Font.Gotham
-    SelectAllBtn.TextSize = 10
-    SelectAllBtn.Parent = ActionFrame
-end)
+local StopButton = safeCreate("TextButton", ButtonFrame, {
+    Position = UDim2.new(0.55, 5, 0, 0),
+    Size = UDim2.new(0.45, -5, 1, 0),
+    BackgroundColor3 = Color3.fromRGB(60, 45, 75),
+    BorderSizePixel = 0,
+    Text = "⏹ STOP FLING",
+    TextColor3 = Color3.fromRGB(255, 255, 255),
+    Font = Enum.Font.GothamBold,
+    TextSize = 14
+})
 
--- Deselect all button
-local DeselectAllBtn
-_, err = pcall(function()
-    DeselectAllBtn = Instance.new("TextButton")
-    DeselectAllBtn.Size = UDim2.new(0.45, -5, 1, 0)
-    DeselectAllBtn.Position = UDim2.new(0.55, 5, 0, 0)
-    DeselectAllBtn.BackgroundTransparency = 1
-    DeselectAllBtn.Text = "DESELECT ALL"
-    DeselectAllBtn.TextColor3 = Color3.new(0.8, 0.6, 0.4)
-    DeselectAllBtn.Font = Enum.Font.Gotham
-    DeselectAllBtn.TextSize = 10
-    DeselectAllBtn.Parent = ActionFrame
-end)
+addCorner(StopButton, 8)
 
--- Variables
+local ActionFrame = safeCreate("Frame", MainFrame, {
+    Position = UDim2.new(0, 15, 0, 465),
+    Size = UDim2.new(1, -30, 0, 25),
+    BackgroundTransparency = 1
+})
+
+local SelectAllButton = safeCreate("TextButton", ActionFrame, {
+    Position = UDim2.new(0, 0, 0, 0),
+    Size = UDim2.new(0.45, -5, 1, 0),
+    BackgroundTransparency = 1,
+    Text = "SELECT ALL",
+    TextColor3 = Color3.fromRGB(200, 160, 100),
+    Font = Enum.Font.Gotham,
+    TextSize = 12
+})
+
+local DeselectAllButton = safeCreate("TextButton", ActionFrame, {
+    Position = UDim2.new(0.55, 5, 0, 0),
+    Size = UDim2.new(0.45, -5, 1, 0),
+    BackgroundTransparency = 1,
+    Text = "DESELECT ALL",
+    TextColor3 = Color3.fromRGB(200, 160, 100),
+    Font = Enum.Font.Gotham,
+    TextSize = 12
+})
+
+local SettingsFrame = safeCreate("Frame", MainFrame, {
+    Position = UDim2.new(0, 15, 0, 495),
+    Size = UDim2.new(1, -30, 0, 20),
+    BackgroundTransparency = 1
+})
+
+local PowerLabel = safeCreate("TextLabel", SettingsFrame, {
+    Position = UDim2.new(0, 0, 0, 0),
+    Size = UDim2.new(0.3, 0, 1, 0),
+    BackgroundTransparency = 1,
+    Text = "Power: 9e7",
+    TextColor3 = Color3.fromRGB(200, 160, 100),
+    Font = Enum.Font.Gotham,
+    TextSize = 10
+})
+
 local SelectedTargets = {}
-local IsFlinging = false
-local FlingCoroutine = nil
+local PlayerEntries = {}
+local FlingActive = false
+local FlingLoop = nil
 
--- Safe function to check if target is valid
-local function IsValidTarget(target)
-    if not target then return false end
-    if target == Player then return false end
-    
-    local success, char = pcall(function()
+local OriginalFPDH = workspace.FallenPartsDestroyHeight
+local OriginalCameraSubject = nil
+
+local function IsTargetValid(target)
+    if not target or target == Player then return false end
+    local success, character = pcall(function()
         return target.Character
     end)
-    if not success or not char then return false end
+    if not success or not character then return false end
     
-    local success, hum = pcall(function()
-        return char:FindFirstChild("Humanoid")
+    local success, humanoid = pcall(function()
+        return character:FindFirstChildOfClass("Humanoid")
     end)
-    if not success or not hum then return false end
+    if not success or not humanoid or humanoid.Health <= 0 then return false end
     
-    local success, health = pcall(function()
-        return hum.Health
-    end)
-    if not success or health <= 0 then return false end
-    
+    -- Check if target is in Survivors team
     local success, team = pcall(function()
         return target.Team
     end)
     if success and team then
-        local success, teamName = pcall(function()
-            return team.Name
-        end)
-        if success and teamName == "Survivors" then
-            return false
-        end
+        return team.Name ~= "Survivors"
     end
     
     return true
 end
 
--- Update status display
-local function UpdateStatus()
-    local count = 0
-    for _ in pairs(SelectedTargets) do
-        count = count + 1
+local function GetPlayerThumbnail(player)
+    local success, url = pcall(function()
+        return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size60x60)
+    end)
+    if success and url then
+        return url
     end
-    
-    if IsFlinging then
-        StatusLabel.Text = "⚡ Flinging " .. count .. " target(s)"
-    else
-        StatusLabel.Text = count .. " target(s) selected"
-    end
+    return "rbxasset://textures/ui/GuiImagePlaceholder.png"
 end
 
--- Refresh player list
+local function UpdateStatus()
+    local count = 0
+    for _ in pairs(SelectedTargets) do 
+        count = count + 1 
+    end
+    pcall(function()
+        if FlingActive then
+            StatusLabel.Text = "✨ flinging " .. count .. " target(s)"
+            StatusLabel.TextColor3 = Color3.fromRGB(230, 190, 100)
+        else
+            StatusLabel.Text = count .. " target(s) selected"
+            StatusLabel.TextColor3 = Color3.fromRGB(220, 210, 240)
+        end
+    end)
+end
+
 local function RefreshPlayerList()
     pcall(function()
-        -- Clear old entries
-        for _, child in ipairs(ScrollFrame:GetChildren()) do
+        for _, child in pairs(PlayerScroll:GetChildren()) do
             if child:IsA("Frame") then
                 child:Destroy()
             end
         end
+        PlayerEntries = {}
         
-        local yPos = 5
-        local players = Players:GetPlayers()
-        
-        for _, player in ipairs(players) do
-            if IsValidTarget(player) then
-                -- Entry frame
-                local entry = Instance.new("Frame")
-                entry.Size = UDim2.new(1, -10, 0, 44)
-                entry.Position = UDim2.new(0, 5, 0, yPos)
-                entry.BackgroundColor3 = Color3.new(0.18, 0.12, 0.22)
-                entry.BackgroundTransparency = 0.2
-                entry.BorderSizePixel = 0
-                entry.Parent = ScrollFrame
-                
-                -- Corner
-                local corner = Instance.new("UICorner")
-                corner.CornerRadius = UDim.new(0, 6)
-                corner.Parent = entry
-                
-                -- Name label
-                local nameLabel = Instance.new("TextLabel")
-                nameLabel.Size = UDim2.new(1, -45, 0.5, 0)
-                nameLabel.Position = UDim2.new(0, 8, 0, 4)
-                nameLabel.BackgroundTransparency = 1
-                nameLabel.Text = player.Name
-                nameLabel.TextColor3 = Color3.new(1, 0.95, 1)
-                nameLabel.Font = Enum.Font.GothamBold
-                nameLabel.TextSize = 12
-                nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-                nameLabel.Parent = entry
-                
-                -- Team label
-                local teamName = "No Team"
-                pcall(function()
-                    if player.Team then
-                        teamName = player.Team.Name
-                    end
-                end)
-                
-                local teamLabel = Instance.new("TextLabel")
-                teamLabel.Size = UDim2.new(1, -45, 0.5, 0)
-                teamLabel.Position = UDim2.new(0, 8, 0, 22)
-                teamLabel.BackgroundTransparency = 1
-                teamLabel.Text = teamName
-                teamLabel.TextColor3 = Color3.new(0.7, 0.6, 0.8)
-                teamLabel.Font = Enum.Font.Gotham
-                teamLabel.TextSize = 10
-                teamLabel.TextXAlignment = Enum.TextXAlignment.Left
-                teamLabel.Parent = entry
-                
-                -- Checkbox frame
-                local checkBox = Instance.new("Frame")
-                checkBox.Size = UDim2.new(0, 22, 0, 22)
-                checkBox.Position = UDim2.new(1, -30, 0.5, -11)
-                checkBox.BackgroundColor3 = Color3.new(0.25, 0.18, 0.3)
-                checkBox.BorderSizePixel = 0
-                checkBox.Parent = entry
-                
-                local checkCorner = Instance.new("UICorner")
-                checkCorner.CornerRadius = UDim.new(0, 4)
-                checkCorner.Parent = checkBox
-                
-                -- Checkmark
-                local checkMark = Instance.new("TextLabel")
-                checkMark.Size = UDim2.new(1, 0, 1, 0)
-                checkMark.BackgroundTransparency = 1
-                checkMark.Text = "✓"
-                checkMark.TextColor3 = Color3.new(0.9, 0.7, 0.35)
-                checkMark.TextSize = 16
-                checkMark.Font = Enum.Font.GothamBold
-                checkMark.Visible = SelectedTargets[player.Name] ~= nil
-                checkMark.Parent = checkBox
-                
-                -- Click area
-                local clickArea = Instance.new("TextButton")
-                clickArea.Size = UDim2.new(1, 0, 1, 0)
-                clickArea.BackgroundTransparency = 1
-                clickArea.Text = ""
-                clickArea.Parent = entry
-                
-                clickArea.MouseButton1Click:Connect(function()
-                    if SelectedTargets[player.Name] then
-                        SelectedTargets[player.Name] = nil
-                        checkMark.Visible = false
-                    else
-                        SelectedTargets[player.Name] = player
-                        checkMark.Visible = true
-                    end
-                    UpdateStatus()
-                end)
-                
-                yPos = yPos + 48
+        local playerList = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if IsTargetValid(p) then
+                table.insert(playerList, p)
             end
         end
+        table.sort(playerList, function(a, b) 
+            return a and b and a.Name:lower() < b.Name:lower() 
+        end)
         
-        ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, yPos + 5)
+        local yPos = 5
+        for _, targetPlayer in ipairs(playerList) do
+            local entry = safeCreate("Frame", PlayerScroll, {
+                Size = UDim2.new(1, -10, 0, 55),
+                Position = UDim2.new(0, 5, 0, yPos),
+                BackgroundColor3 = Color3.fromRGB(45, 35, 55),
+                BackgroundTransparency = 0.3,
+                BorderSizePixel = 0
+            })
+            
+            addCorner(entry, 8)
+            
+            local thumbContainer = safeCreate("Frame", entry, {
+                Size = UDim2.new(0, 40, 0, 40),
+                Position = UDim2.new(0, 8, 0.5, -20),
+                BackgroundColor3 = Color3.fromRGB(30, 22, 38),
+                BorderSizePixel = 0
+            })
+            
+            addCorner(thumbContainer, 20)
+            
+            local thumbnail = safeCreate("ImageLabel", thumbContainer, {
+                Size = UDim2.new(1, 0, 1, 0),
+                BackgroundTransparency = 1
+            })
+            
+            pcall(function()
+                thumbnail.Image = GetPlayerThumbnail(targetPlayer)
+            end)
+            
+            local nameLabel = safeCreate("TextLabel", entry, {
+                Position = UDim2.new(0, 55, 0, 8),
+                Size = UDim2.new(1, -130, 0, 22),
+                BackgroundTransparency = 1,
+                Text = targetPlayer.Name,
+                TextColor3 = Color3.fromRGB(255, 245, 255),
+                Font = Enum.Font.GothamBold,
+                TextSize = 14,
+                TextXAlignment = Enum.TextXAlignment.Left
+            })
+            
+            local teamName = "No Team"
+            pcall(function()
+                if targetPlayer.Team then
+                    teamName = targetPlayer.Team.Name
+                end
+            end)
+            
+            local teamLabel = safeCreate("TextLabel", entry, {
+                Position = UDim2.new(0, 55, 0, 30),
+                Size = UDim2.new(1, -130, 0, 18),
+                BackgroundTransparency = 1,
+                Text = teamName,
+                TextColor3 = Color3.fromRGB(180, 160, 200),
+                Font = Enum.Font.Gotham,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left
+            })
+            
+            local checkBox = safeCreate("Frame", entry, {
+                Position = UDim2.new(1, -45, 0.5, -15),
+                Size = UDim2.new(0, 30, 0, 30),
+                BackgroundColor3 = Color3.fromRGB(60, 45, 75),
+                BorderSizePixel = 0
+            })
+            
+            addCorner(checkBox, 8)
+            
+            local checkMark = safeCreate("TextLabel", checkBox, {
+                Size = UDim2.new(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                Text = "✓",
+                TextColor3 = Color3.fromRGB(230, 190, 100),
+                TextSize = 20,
+                Font = Enum.Font.GothamBold,
+                Visible = SelectedTargets[targetPlayer.Name] ~= nil
+            })
+            
+            local clickArea = safeCreate("TextButton", entry, {
+                Size = UDim2.new(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                Text = ""
+            })
+            
+            clickArea.MouseButton1Click:Connect(function()
+                if SelectedTargets[targetPlayer.Name] then
+                    SelectedTargets[targetPlayer.Name] = nil
+                    checkMark.Visible = false
+                else
+                    SelectedTargets[targetPlayer.Name] = targetPlayer
+                    checkMark.Visible = true
+                end
+                UpdateStatus()
+            end)
+            
+            PlayerEntries[targetPlayer.Name] = {
+                Entry = entry,
+                CheckMark = checkMark
+            }
+            
+            yPos = yPos + 62
+        end
+        
+        PlayerScroll.CanvasSize = UDim2.new(0, 0, 0, yPos + 5)
     end)
 end
 
--- Select/Deselect all
 local function ToggleAllPlayers(select)
     pcall(function()
-        for _, child in ipairs(ScrollFrame:GetChildren()) do
-            if child:IsA("Frame") then
-                local nameLabel = child:FindFirstChild("TextLabel")
-                if nameLabel then
-                    local player = Players:FindFirstChild(nameLabel.Text)
-                    if player and IsValidTarget(player) then
-                        local checkBox = child:FindFirstChild("Frame")
-                        local checkMark = checkBox and checkBox:FindFirstChild("TextLabel")
-                        
-                        if select then
-                            SelectedTargets[player.Name] = player
-                            if checkMark then checkMark.Visible = true end
-                        else
-                            SelectedTargets[player.Name] = nil
-                            if checkMark then checkMark.Visible = false end
-                        end
-                    end
+        for name, entry in pairs(PlayerEntries) do
+            local player = Players:FindFirstChild(name)
+            if player and IsTargetValid(player) then
+                if select then
+                    SelectedTargets[name] = player
+                    entry.CheckMark.Visible = true
+                else
+                    SelectedTargets[name] = nil
+                    entry.CheckMark.Visible = false
                 end
             end
         end
@@ -440,145 +469,228 @@ local function ToggleAllPlayers(select)
     end)
 end
 
--- Fling function
-local function FlingTarget(target)
-    pcall(function()
+local function FlingTarget(targetPlayer)
+    return pcall(function()
         local character = Player.Character
-        if not character then return end
+        if not character then return false end
         
-        local humanoid = character:FindFirstChild("Humanoid")
-        if not humanoid then return end
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then return false end
         
         local rootPart = humanoid.RootPart
-        if not rootPart then return end
+        if not rootPart then return false end
         
-        local targetChar = target.Character
-        if not targetChar then return end
+        local targetChar = targetPlayer.Character
+        if not targetChar then return false end
         
-        local targetHumanoid = targetChar:FindFirstChild("Humanoid")
-        if not targetHumanoid then return end
+        local targetHumanoid = targetChar:FindFirstChildOfClass("Humanoid")
+        if not targetHumanoid or targetHumanoid.Health <= 0 then return false end
         
         local targetRoot = targetHumanoid.RootPart
-        if not targetRoot then return end
+        if not targetRoot then return false end
         
-        -- Store original position
+        if not OriginalCameraSubject then
+            OriginalCameraSubject = workspace.CurrentCamera.CameraSubject
+        end
+        
+        workspace.CurrentCamera.CameraSubject = targetHumanoid
+        
+        local originalSeatState = humanoid.Sit
+        humanoid.Sit = false
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+        
         local originalPos = rootPart.CFrame
         
-        -- Create body velocity
-        local bodyVel = Instance.new("BodyVelocity")
-        bodyVel.Velocity = Vector3.new(99999999, 199999998, 99999999)
-        bodyVel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        bodyVel.Parent = rootPart
+        local bodyVelocity = Instance.new("BodyVelocity")
+        bodyVelocity.Velocity = Vector3.new(CONFIG.FLING_POWER, CONFIG.FLING_POWER * 2, CONFIG.FLING_POWER)
+        bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        bodyVelocity.Parent = rootPart
         
-        -- Disable sitting
-        humanoid.Sit = false
+        local bodyAngularVelocity = Instance.new("BodyAngularVelocity")
+        bodyAngularVelocity.AngularVelocity = Vector3.new(CONFIG.ROTATION_POWER, CONFIG.ROTATION_POWER, CONFIG.ROTATION_POWER)
+        bodyAngularVelocity.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+        bodyAngularVelocity.Parent = rootPart
         
-        -- Fling loop
-        for i = 1, 15 do
-            if not IsFlinging then break end
+        local attachment = Instance.new("Attachment")
+        attachment.Parent = targetRoot
+        
+        local alignPosition = Instance.new("AlignPosition")
+        alignPosition.Parent = rootPart
+        alignPosition.Attachment0 = rootPart:FindFirstChildOfClass("Attachment") or Instance.new("Attachment", rootPart)
+        alignPosition.Attachment1 = attachment
+        alignPosition.RigidityEnabled = true
+        alignPosition.MaxForce = 9e9
+        alignPosition.MaxVelocity = 9e9
+        
+        local startTime = tick()
+        local angle = 0
+        
+        while FlingActive and tick() - startTime < CONFIG.FLING_DURATION do
             if not rootPart.Parent or not targetRoot.Parent then break end
             
-            rootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 2, 0)
-            pcall(function()
-                character:SetPrimaryPartCFrame(rootPart.CFrame)
-            end)
+            angle = angle + 100
             
-            task.wait(0.05)
+            rootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 1.5, 0) * CFrame.Angles(math.rad(angle), 0, 0)
+            character:SetPrimaryPartCFrame(rootPart.CFrame)
+            
+            bodyVelocity.Velocity = Vector3.new(CONFIG.FLING_POWER, CONFIG.FLING_POWER * 2, CONFIG.FLING_POWER)
+            bodyAngularVelocity.AngularVelocity = Vector3.new(CONFIG.ROTATION_POWER, CONFIG.ROTATION_POWER, CONFIG.ROTATION_POWER)
+            
+            task.wait()
         end
         
-        -- Cleanup
-        bodyVel:Destroy()
+        alignPosition:Destroy()
+        attachment:Destroy()
+        bodyVelocity:Destroy()
+        bodyAngularVelocity:Destroy()
         
-        -- Return to original position
-        for i = 1, 8 do
+        humanoid.Sit = originalSeatState
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+        
+        local returnTime = tick()
+        while tick() - returnTime < 0.5 do
             rootPart.CFrame = originalPos * CFrame.new(0, 0.5, 0)
-            pcall(function()
-                character:SetPrimaryPartCFrame(rootPart.CFrame)
-            end)
-            task.wait(0.05)
+            character:SetPrimaryPartCFrame(rootPart.CFrame)
+            humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+            task.wait()
         end
+        
+        if OriginalCameraSubject then
+            workspace.CurrentCamera.CameraSubject = OriginalCameraSubject
+        end
+        
+        return true
     end)
 end
 
--- Start flinging
 local function StartFling()
-    if IsFlinging then return end
+    if FlingActive then 
+        Notify("MoonWare", "Fling already active!", 2)
+        return 
+    end
     
     local count = 0
-    for _ in pairs(SelectedTargets) do
-        count = count + 1
+    for _ in pairs(SelectedTargets) do 
+        count = count + 1 
     end
     
     if count == 0 then
-        Notify("MoonWare", "No targets selected")
+        StatusLabel.Text = "⚠ no targets selected"
+        task.wait(1.5)
+        UpdateStatus()
+        Notify("MoonWare", "Please select at least one target", 2)
         return
     end
     
-    IsFlinging = true
+    FlingActive = true
     UpdateStatus()
-    Notify("MoonWare", "Flinging " .. count .. " targets")
+    Notify("MoonWare", "🌙 Flinging " .. count .. " targets", 2)
     
-    FlingCoroutine = coroutine.create(function()
-        while IsFlinging do
+    if CONFIG.SAFE_MODE then
+        OriginalFPDH = workspace.FallenPartsDestroyHeight
+        workspace.FallenPartsDestroyHeight = -9e9
+    end
+    
+    FlingLoop = task.spawn(function()
+        while FlingActive do
             local targets = {}
             for name, player in pairs(SelectedTargets) do
-                if player and player.Character then
+                if player and player.Parent and IsTargetValid(player) then
                     table.insert(targets, player)
                 else
                     SelectedTargets[name] = nil
                 end
             end
             
-            for _, player in ipairs(targets) do
-                if not IsFlinging then break end
-                FlingTarget(player)
-                task.wait(0.1)
+            for _, target in ipairs(targets) do
+                if not FlingActive then break end
+                
+                local success = FlingTarget(target)
+                if not success then
+                    SelectedTargets[target.Name] = nil
+                    RefreshPlayerList()
+                end
+                
+                task.wait(CONFIG.UPDATE_INTERVAL)
             end
             
             UpdateStatus()
             task.wait(0.3)
         end
     end)
-    
-    coroutine.resume(FlingCoroutine)
 end
 
 local function StopFling()
-    if not IsFlinging then return end
-    IsFlinging = false
-    FlingCoroutine = nil
+    if not FlingActive then return end
+    
+    FlingActive = false
+    if FlingLoop then
+        task.cancel(FlingLoop)
+        FlingLoop = nil
+    end
+    
+    -- Restore FallenPartsDestroyHeight
+    if CONFIG.SAFE_MODE and OriginalFPDH then
+        workspace.FallenPartsDestroyHeight = OriginalFPDH
+    end
+    
+    -- Restore camera
+    if OriginalCameraSubject then
+        workspace.CurrentCamera.CameraSubject = OriginalCameraSubject
+        OriginalCameraSubject = nil
+    end
+    
     UpdateStatus()
-    Notify("MoonWare", "Fling stopped")
+    Notify("MoonWare", "⏹ Fling stopped", 2)
 end
 
-if StartButton then
-    StartButton.MouseButton1Click:Connect(StartFling)
-end
-
-if StopButton then
-    StopButton.MouseButton1Click:Connect(StopFling)
-end
-
-if SelectAllBtn then
-    SelectAllBtn.MouseButton1Click:Connect(function() ToggleAllPlayers(true) end)
-end
-
-if DeselectAllBtn then
-    DeselectAllBtn.MouseButton1Click:Connect(function() ToggleAllPlayers(false) end)
-end
-
-if CloseButton then
-    CloseButton.MouseButton1Click:Connect(function()
-        StopFling()
-        if ScreenGui then
-            ScreenGui:Destroy()
-        end
+local function addHoverEffect(button, color1, color2)
+    button.MouseEnter:Connect(function()
+        pcall(function()
+            TweenService:Create(button, TweenInfo.new(0.2), {
+                BackgroundColor3 = color2 or Color3.fromRGB(100, 70, 140)
+            }):Play()
+        end)
+    end)
+    
+    button.MouseLeave:Connect(function()
+        pcall(function()
+            TweenService:Create(button, TweenInfo.new(0.2), {
+                BackgroundColor3 = color1
+            }):Play()
+        end)
     end)
 end
+
+addHoverEffect(StartButton, Color3.fromRGB(80, 50, 120), Color3.fromRGB(100, 70, 140))
+addHoverEffect(StopButton, Color3.fromRGB(60, 45, 75), Color3.fromRGB(80, 60, 100))
+
+StartButton.MouseButton1Click:Connect(StartFling)
+StopButton.MouseButton1Click:Connect(StopFling)
+SelectAllButton.MouseButton1Click:Connect(function() ToggleAllPlayers(true) end)
+DeselectAllButton.MouseButton1Click:Connect(function() ToggleAllPlayers(false) end)
+CloseButton.MouseButton1Click:Connect(function()
+    StopFling()
+    ScreenGui:Destroy()
+end)
 
 Players.PlayerAdded:Connect(RefreshPlayerList)
 Players.PlayerRemoving:Connect(RefreshPlayerList)
 
+Players.PlayerAdded:Connect(function(p)
+    pcall(function()
+        p:WaitForChild("Team")
+        RefreshPlayerList()
+    end)
+end)
+
+game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
+    if FlingActive then
+        StopFling()
+    end
+end)
+
+-- Init
 RefreshPlayerList()
 UpdateStatus()
-Notify("MoonWare", "Loaded successfully")
+Notify("MoonWare", "🌙 Loaded • Survivors excluded", 3)

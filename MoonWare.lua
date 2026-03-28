@@ -138,7 +138,7 @@ local CloseButton = safeCreate("TextButton", TitleBar, {
     Position = UDim2.new(1, -40, 0, 0),
     Size = UDim2.new(0, 40, 0, 50),
     BackgroundTransparency = 1,
-    Text = "✕",
+    Text = "×",
     TextColor3 = Color3.fromRGB(200, 160, 100),
     Font = Enum.Font.GothamBold,
     TextSize = 20
@@ -157,7 +157,7 @@ addCorner(StatusCard, 8)
 local StatusIcon = safeCreate("TextLabel", StatusCard, {
     Size = UDim2.new(0, 35, 1, 0),
     BackgroundTransparency = 1,
-    Text = "🎯",
+    Text = "🪽",
     TextColor3 = Color3.fromRGB(230, 190, 100),
     TextSize = 20,
     Font = Enum.Font.Gotham
@@ -205,7 +205,7 @@ local StartButton = safeCreate("TextButton", ButtonFrame, {
     Size = UDim2.new(0.45, -5, 1, 0),
     BackgroundColor3 = Color3.fromRGB(80, 50, 120),
     BorderSizePixel = 0,
-    Text = "🌙 START FLING",
+    Text = "START FLING",
     TextColor3 = Color3.fromRGB(255, 255, 255),
     Font = Enum.Font.GothamBold,
     TextSize = 14
@@ -218,7 +218,7 @@ local StopButton = safeCreate("TextButton", ButtonFrame, {
     Size = UDim2.new(0.45, -5, 1, 0),
     BackgroundColor3 = Color3.fromRGB(60, 45, 75),
     BorderSizePixel = 0,
-    Text = "⏹ STOP FLING",
+    Text = "STOP FLING",
     TextColor3 = Color3.fromRGB(255, 255, 255),
     Font = Enum.Font.GothamBold,
     TextSize = 14
@@ -288,12 +288,11 @@ local function IsTargetValid(target)
     end)
     if not success or not humanoid or humanoid.Health <= 0 then return false end
     
-    -- Check if target is in Survivors team
     local success, team = pcall(function()
         return target.Team
     end)
     if success and team then
-        return team.Name ~= "Survivors"
+        return team.Name ~= "Spectators"
     end
     
     return true
@@ -690,7 +689,9 @@ game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
     end
 end)
 
--- Init
+-- Initialize
 RefreshPlayerList()
 UpdateStatus()
 Notify("MoonWare", "🌙 Loaded • Survivors excluded", 3)
+
+print("MoonWare loaded successfully")

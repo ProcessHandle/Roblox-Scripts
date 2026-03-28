@@ -166,7 +166,7 @@ addCorner(StatusCard, 8)
 local StatusIcon = safeCreate("TextLabel", StatusCard, {
     Size = UDim2.new(0, 35 * scaleFactor, 1, 0),
     BackgroundTransparency = 1,
-    Text = "🪽",
+    Text = "🎯",
     TextColor3 = Color3.fromRGB(230, 190, 100),
     TextSize = 20 * scaleFactor,
     Font = Enum.Font.Gotham

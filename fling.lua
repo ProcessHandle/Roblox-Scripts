@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local localPlayer = Players.LocalPlayer
 
 local headSit = nil
@@ -23,6 +24,32 @@ local function isSpectator(plr)
 	if char:GetAttribute("Spectator") == true then
 		return true
 	end
+	return false
+end
+
+local function ragdollPlayer(plr)
+	local args = {
+		buffer.fromstring("\031\000\027")
+	}
+	local remote = ReplicatedStorage:FindFirstChild("Modules")
+	if remote then
+		remote = remote:FindFirstChild("Network")
+		if remote then
+			remote = remote:FindFirstChild("Packets")
+			if remote then
+				remote = remote:FindFirstChild("Packet")
+				if remote then
+					remote = remote:FindFirstChild("RemoteEvent")
+					if remote then
+						remote:FireServer(unpack(args))
+						print("[DEBUG] Ragdoll remote fired")
+						return true
+					end
+				end
+			end
+		end
+	end
+	print("[WARN] Could not find ragdoll remote")
 	return false
 end
 
@@ -55,7 +82,6 @@ local function stopAll()
 		local myRoot = getRoot(myChar)
 		if myRoot then
 			myRoot.Velocity = Vector3.new(0, 0, 0)
-			myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 		end
 	end
 	currentTarget = nil
@@ -67,6 +93,10 @@ local function startOnTarget(target)
 	stopAll()
 	currentTarget = target
 	
+	print("[DEBUG] Step 1: Ragdolling " .. target.Name)
+	ragdollPlayer(target)
+	task.wait(0.5)
+	
 	local myChar = localPlayer.Character
 	if not myChar then
 		myChar = localPlayer.CharacterAdded:Wait()
@@ -76,13 +106,13 @@ local function startOnTarget(target)
 	local myHumanoid = myChar:FindFirstChildOfClass("Humanoid")
 	if not myHumanoid then return end
 	
-	-- Teleport YOU directly into the target first
+	-- Make YOU sit on their head
 	local targetChar = currentTarget.Character
 	if targetChar then
 		local targetRoot = getRoot(targetChar)
 		local myRoot = getRoot(myChar)
 		if targetRoot and myRoot then
-			-- Sit on their head
+			print("[DEBUG] Step 2: Teleporting to head")
 			myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 1.6, 0)
 			myHumanoid.Sit = true
 		end
@@ -99,12 +129,14 @@ local function startOnTarget(target)
 		local myHum = myCurrChar and myCurrChar:FindFirstChildOfClass("Humanoid")
 		
 		if targetRoot and myRoot and myHum and myHum.Sit == true then
-			-- Stay on their head
 			myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 1.6, 0)
 		end
 	end)
 	
-	-- Walkfling - fling YOUR character into them repeatedly
+	-- Walkfling - fling YOUR character into them
+	task.wait(0.3)
+	print("[DEBUG] Step 3: Starting fling")
+	
 	walkflinging = true
 	task.spawn(function()
 		local iter = 0
@@ -115,30 +147,33 @@ local function startOnTarget(target)
 			local targetRoot = targetChar and getRoot(targetChar)
 			
 			if myRoot and targetRoot then
-				-- Face the target
 				local direction = (targetRoot.Position - myRoot.Position).Unit
 				
 				iter = iter + 1
-				if iter % 10 == 0 then
-					print("[DEBUG] Flinging into " .. currentTarget.Name .. " - Velocity: " .. tostring(myRoot.Velocity))
+				local vel, movel = nil, 0.1
+				
+				-- Massive velocity spike into them
+				myRoot.Velocity = direction * 10000 + Vector3.new(0, 10000, 0)
+				
+				task.wait()
+				if myRoot and myRoot.Parent and walkflinging then
+					myRoot.Velocity = vel or Vector3.new()
 				end
 				
-				-- Launch yourself at them
-				myRoot.Velocity = direction * 500 + Vector3.new(0, 100, 0)
-				
-				task.wait(0.1)
-				
-				-- Reset and launch again
-				myRoot.Velocity = direction * 500 + Vector3.new(0, -100, 0)
+				task.wait()
+				if myRoot and myRoot.Parent and walkflinging then
+					myRoot.Velocity = (vel or Vector3.new()) + Vector3.new(0, movel, 0)
+					movel = movel * -1
+				end
 			end
-			task.wait(0.2)
+			task.wait()
 		end
 	end)
 	
 	-- Stop if target dies or becomes spectator
 	local function checkTargetLost()
 		if currentTarget and (not currentTarget.Character or isSpectator(currentTarget)) then
-			print("Target lost or became spectator")
+			print("[DEBUG] Target lost, stopping")
 			stopAll()
 		end
 	end
@@ -154,15 +189,17 @@ local function startOnTarget(target)
 end
 
 local function start()
+	print("[DEBUG] Looking for target...")
 	local target = getRandomNonSpectator()
 	if target then
-		print("Targeting: " .. target.Name)
+		print("[DEBUG] Found target: " .. target.Name)
 		startOnTarget(target)
 	else
-		print("No target, waiting...")
+		print("[DEBUG] No target, waiting for player...")
 		local conn
 		conn = Players.PlayerAdded:Connect(function(plr)
 			if plr ~= localPlayer and not isSpectator(plr) then
+				print("[DEBUG] Player joined: " .. plr.Name)
 				conn:Disconnect()
 				task.wait(1)
 				startOnTarget(plr)
@@ -183,6 +220,9 @@ end)
 _G.stop = stopAll
 _G.restart = start
 
-print("=== Loaded ===")
-print("Sits you on target's head and flings YOU into them")
-print("Your velocity collides with target to fling them")
+print("=== Script Loaded ===")
+print("Step 1: Ragdolls target player")
+print("Step 2: Sits on their head")
+print("Step 3: Flings into them repeatedly")
+print("Type _G.stop() to stop")
+print("Type _G.restart() to restart")

@@ -1,11 +1,18 @@
-_G.TargetId = 2632374645 -- Change this to your target's User ID
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local localPlayer = Players.LocalPlayer
 
-local TARGET_USER_ID = _G.TargetId or 2632374645
+local TARGET_USER_ID = _G.TargetId
+
+if not TARGET_USER_ID then
+    task.wait(0.2)
+    TARGET_USER_ID = _G.TargetId
+end
+
+if not TARGET_USER_ID then
+    error("You must set _G.TargetId before loading the script!\nExample: _G.TargetId = 10107875918")
+end
 
 local blacklist = {
   1288458401,
@@ -223,16 +230,33 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 local function findAndStart()
-	local target = Players:FindFirstChild(tostring(TARGET_USER_ID))
+	print("[DEBUG] Looking for target with User ID: " .. TARGET_USER_ID)
+	
+	-- Print all players for debugging
+	local allPlayers = Players:GetPlayers()
+	print("[DEBUG] Current players in server:")
+	for _, plr in pairs(allPlayers) do
+		print("  - " .. plr.Name .. " (ID: " .. plr.UserId .. ")")
+	end
+	
+	local target = nil
+	for _, plr in pairs(allPlayers) do
+		if plr.UserId == TARGET_USER_ID then
+			target = plr
+			break
+		end
+	end
+	
 	if target then
 		print("[DEBUG] Found target: " .. target.Name)
 		startOnTarget(target)
 	else
-		print("[DEBUG] Target not found, waiting for " .. TARGET_USER_ID .. " to join...")
+		print("[DEBUG] Target " .. TARGET_USER_ID .. " not found in current server, waiting...")
 		local conn
 		conn = Players.PlayerAdded:Connect(function(plr)
+			print("[DEBUG] Player joined: " .. plr.Name .. " (ID: " .. plr.UserId .. ")")
 			if plr.UserId == TARGET_USER_ID then
-				print("[DEBUG] Target joined: " .. plr.Name)
+				print("[DEBUG] Target joined!")
 				conn:Disconnect()
 				task.wait(2)
 				startOnTarget(plr)
@@ -241,14 +265,22 @@ local function findAndStart()
 	end
 end
 
+task.wait(0.5)
 findAndStart()
 
 _G.stop = stopAll
 _G.restart = findAndStart
+_G.setTarget = function(userId)
+	print("[DEBUG] Setting new target to: " .. userId)
+	TARGET_USER_ID = userId
+	_G.TargetId = userId
+	stopAll()
+	task.wait(1)
+	findAndStart()
+end
 
 print("=== Script Loaded ===")
-print("Set _G.TargetId before loading to change target")
 print("Current Target ID: " .. TARGET_USER_ID)
-print("Blacklist count: " .. #blacklist)
-print("Type _G.stop() to stop")
-print("Type _G.restart() to restart")
+print("To change target: _G.setTarget(USER_ID)")
+print("To stop: _G.stop()")
+print("To restart: _G.restart()")

@@ -2,12 +2,15 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local localPlayer = Players.LocalPlayer
 
-local targetPlayer = nil
 local active = false
 local headSitConn = nil
 local flingThread = nil
+local currentTarget = nil
 
--- Function to check if a player is a spectator
+local function getRoot(char)
+	return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+end
+
 local function isSpectator(player)
 	local char = player.Character
 	if not char then return false end
@@ -25,11 +28,10 @@ local function isSpectator(player)
 	return false
 end
 
--- Get a random player (not local, not spectator)
 local function getRandomPlayer()
 	local validPlayers = {}
 	for _, plr in pairs(Players:GetPlayers()) do
-		if plr ~= localPlayer and not isSpectator(plr) and plr.Character then
+		if plr ~= localPlayer and not isSpectator(plr) and plr.Character and getRoot(plr.Character) then
 			table.insert(validPlayers, plr)
 		end
 	end
@@ -39,108 +41,158 @@ local function getRandomPlayer()
 	return nil
 end
 
-function startEffect()
-	if active then return end
-	
-	targetPlayer = getRandomPlayer()
-	if not targetPlayer then
-		print("No valid target found")
-		return
+local function stopEffect()
+	print("Stopping effect...")
+	active = false
+	if headSitConn then
+		headSitConn:Disconnect()
+		headSitConn = nil
 	end
+	if flingThread then
+		coroutine.close(flingThread)
+		flingThread = nil
+	end
+	if currentTarget and currentTarget.Character then
+		local humanoid = currentTarget.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.Sit = false
+		end
+		local root = getRoot(currentTarget.Character)
+		if root then
+			root.Velocity = Vector3.new(0, 0, 0)
+		end
+	end
+	currentTarget = nil
+end
+
+local function startEffectOnTarget(target)
+	if not target then return end
 	
-	print("Target found: " .. targetPlayer.Name)
+	stopEffect()
+	currentTarget = target
 	
 	-- Wait for character if needed
-	if not targetPlayer.Character then
-		targetPlayer.CharacterAdded:Wait()
-		task.wait(1)
+	local char = currentTarget.Character
+	if not char then
+		print("Waiting for character...")
+		char = currentTarget.CharacterAdded:Wait()
+		task.wait(0.5)
 	end
 	
-	local char = targetPlayer.Character
 	local humanoid = char:FindFirstChildOfClass("Humanoid")
-	local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+	local root = getRoot(char)
 	
-	if not humanoid or not rootPart then
-		print("Could not find humanoid or root part")
+	if not humanoid or not root then
+		print("No humanoid or root found")
 		return
 	end
 	
-	print("Starting effect on: " .. targetPlayer.Name)
+	print("Starting effect on: " .. currentTarget.Name)
 	active = true
 	
 	-- Make them sit
 	humanoid.Sit = true
 	
-	-- Head sit - keep them on their own head
+	-- Head sit connection - keeps them on their own head
 	headSitConn = RunService.Heartbeat:Connect(function()
-		if not active or not targetPlayer or not targetPlayer.Character then
-			if headSitConn then headSitConn:Disconnect() end
+		if not active or not currentTarget or not currentTarget.Character then
 			return
 		end
-		local currentChar = targetPlayer.Character
-		local currentRoot = currentChar:FindFirstChild("HumanoidRootPart") or currentChar:FindFirstChild("Torso")
-		local currentHumanoid = currentChar:FindFirstChildOfClass("Humanoid")
-		if currentRoot and currentHumanoid and currentHumanoid.Sit == true then
-			currentRoot.CFrame = currentRoot.CFrame * CFrame.new(0, 1.6, 0.4)
+		local currChar = currentTarget.Character
+		local currRoot = getRoot(currChar)
+		local currHumanoid = currChar:FindFirstChildOfClass("Humanoid")
+		if currRoot and currHumanoid and currHumanoid.Sit == true then
+			currRoot.CFrame = currRoot.CFrame * CFrame.new(0, 1.6, 0.4)
 		end
 	end)
 	
-	-- Walk fling
-	flingThread = task.spawn(function()
-		local vel, movel = nil, 0.1
-		while active and targetPlayer and targetPlayer.Character do
-			task.wait()
-			local currentChar = targetPlayer.Character
-			local root = currentChar:FindFirstChild("HumanoidRootPart") or currentChar:FindFirstChild("Torso")
-			
-			if root then
-				vel = root.Velocity
-				root.Velocity = vel * 10000 + Vector3.new(0, 10000, 0)
-				
-				task.wait()
-				if active and root and root.Parent then
-					root.Velocity = vel
-				end
-				
-				task.wait()
-				if active and root and root.Parent then
-					root.Velocity = vel + Vector3.new(0, movel, 0)
-					movel = movel * -1
-				end
+	-- Walk fling thread - CONTINUOUS LOOP
+	flingThread = coroutine.create(function()
+		local iteration = 0
+		local movel = 0.1
+		while true do
+			if not active or not currentTarget or not currentTarget.Character then
+				print("Loop breaking - target lost")
+				break
 			end
+			
+			local currChar = currentTarget.Character
+			local root = getRoot(currChar)
+			
+			if not root then
+				task.wait()
+				continue
+			end
+			
+			iteration = iteration + 1
+			if iteration % 10 == 0 then
+				print("Fling iteration: " .. iteration .. " on " .. currentTarget.Name)
+			end
+			
+			local vel = root.Velocity
+			root.Velocity = vel * 10000 + Vector3.new(0, 10000, 0)
+			task.wait()
+			
+			if active and root and root.Parent then
+				root.Velocity = vel
+			end
+			task.wait()
+			
+			if active and root and root.Parent then
+				root.Velocity = vel + Vector3.new(0, movel, 0)
+				movel = movel * -1
+			end
+			task.wait()
 		end
 	end)
+	coroutine.resume(flingThread)
+	
+	-- Monitor for spectator status changes
+	local function checkSpectator()
+		while active and currentTarget do
+			task.wait(0.5)
+			if isSpectator(currentTarget) then
+				print(currentTarget.Name .. " became a spectator! Stopping effect.")
+				stopEffect()
+				break
+			end
+		end
+	end
+	task.spawn(checkSpectator)
 	
 	-- Stop if they die
 	humanoid.Died:Connect(function()
-		print("Target died, stopping")
-		stopEffect()
+		if active then
+			print(currentTarget.Name .. " died, stopping effect")
+			stopEffect()
+		end
 	end)
 end
 
-function stopEffect()
-	active = false
-	if headSitConn then headSitConn:Disconnect() end
-	if flingThread then task.cancel(flingThread) end
-	if targetPlayer and targetPlayer.Character then
-		local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid.Sit = false
-		end
-		local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart") or targetPlayer.Character:FindFirstChild("Torso")
-		if root then
-			root.Velocity = Vector3.new(0, 0, 0)
-		end
+-- Main function to pick random target and start
+local function start()
+	local target = getRandomPlayer()
+	if target then
+		startEffectOnTarget(target)
+	else
+		print("No valid target found, waiting for player to join...")
+		local conn
+		conn = Players.PlayerAdded:Connect(function(plr)
+			if plr ~= localPlayer and not isSpectator(plr) then
+				conn:Disconnect()
+				task.wait(1)
+				startEffectOnTarget(plr)
+			end
+		end)
 	end
-	print("Effect stopped")
 end
 
--- Start immediately
-startEffect()
+-- Start the script
+start()
 
 _G.stop = stopEffect
-_G.restart = startEffect
+_G.restart = start
 
-print("Script loaded - targeting a random player (not local, not spectator)")
-print("Type _G.stop() to stop")
-print("Type _G.restart() to pick a new random player and start again")
+print("Script loaded!")
+print("Type _G.stop() to stop the effect")
+print("Type _G.restart() to pick a new random player and restart")

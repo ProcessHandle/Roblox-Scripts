@@ -20,11 +20,11 @@ local function getRoot(character)
 	return character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso")
 end
 
-local function isSpectator()
-	local char = localPlayer.Character
+local function isSpectator(player)
+	local char = player.Character
 	if not char then return false end
 	
-	local team = localPlayer.Team
+	local team = player.Team
 	if team then
 		local teamName = team.Name:lower()
 		if teamName:find("spectator") or teamName:find("spec") or teamName:find("ghost") then
@@ -40,14 +40,6 @@ local function isSpectator()
 	end
 	
 	return false
-end
-
-local function resetCharacter()
-	local humanoid = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.Health = 0
-	end
-	localPlayer:LoadCharacter()
 end
 
 local function stopEffect()
@@ -83,8 +75,7 @@ local function combinedEffectOnTarget(targetPlayer)
 		return
 	end
 	
-	if isSpectator() then
-		resetCharacter()
+	if isSpectator(targetPlayer) then
 		return
 	end
 	
@@ -170,6 +161,23 @@ local function combinedEffectOnTarget(targetPlayer)
 	end)
 end
 
+local function getRandomPlayer()
+	local players = Players:GetPlayers()
+	local validPlayers = {}
+	
+	for _, player in ipairs(players) do
+		if player ~= localPlayer and not isSpectator(player) and player.Character then
+			table.insert(validPlayers, player)
+		end
+	end
+	
+	if #validPlayers > 0 then
+		return validPlayers[math.random(1, #validPlayers)]
+	end
+	
+	return nil
+end
+
 local kickQueue = {}
 local processingKick = false
 
@@ -208,14 +216,12 @@ Players.PlayerAdded:Connect(function(player)
 	end
 end)
 
-local TARGET_USER_ID = 2632374645
-
-local target = Players:FindFirstChild(tostring(TARGET_USER_ID))
-if target then
-	combinedEffectOnTarget(target)
+local randomTarget = getRandomPlayer()
+if randomTarget then
+	combinedEffectOnTarget(randomTarget)
 else
 	Players.PlayerAdded:Connect(function(player)
-		if player.UserId == TARGET_USER_ID then
+		if not isSpectator(player) and player ~= localPlayer then
 			task.wait(1)
 			combinedEffectOnTarget(player)
 		end

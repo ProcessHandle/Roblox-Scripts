@@ -9,7 +9,6 @@ local niggas = {
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 
 local localPlayer = Players.LocalPlayer
 local activeConnection = nil
@@ -81,7 +80,6 @@ end
 
 local function combinedEffectOnTarget(targetPlayer)
 	if not targetPlayer then
-		warn("No target player")
 		return
 	end
 	
@@ -96,23 +94,17 @@ local function combinedEffectOnTarget(targetPlayer)
 	
 	local char = currentTarget.Character
 	if not char then
-		local success = currentTarget.CharacterAdded:Wait(5)
-		if not success then
-			warn("Character failed to load")
-			return
-		end
+		currentTarget.CharacterAdded:Wait()
 		char = currentTarget.Character
 		task.wait(0.5)
 	end
 	
 	if not char then
-		warn("No character")
 		return
 	end
 	
 	local humanoid = char:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
-		warn("No humanoid")
 		return
 	end
 	
@@ -176,8 +168,6 @@ local function combinedEffectOnTarget(targetPlayer)
 			stopEffect()
 		end
 	end)
-	
-	print("Effect started on " .. targetPlayer.Name)
 end
 
 local kickQueue = {}
@@ -220,36 +210,16 @@ end)
 
 local TARGET_USER_ID = 2632374645
 
-local function targetByUserId(userId)
-	local target = Players:FindFirstChild(tostring(userId))
-	if target then
-		combinedEffectOnTarget(target)
-	else
-		local connection
-		connection = Players.PlayerAdded:Connect(function(player)
-			if player.UserId == userId then
-				connection:Disconnect()
-				task.wait(1)
-				combinedEffectOnTarget(player)
-			end
-		end)
-	end
+local target = Players:FindFirstChild(tostring(TARGET_USER_ID))
+if target then
+	combinedEffectOnTarget(target)
+else
+	Players.PlayerAdded:Connect(function(player)
+		if player.UserId == TARGET_USER_ID then
+			task.wait(1)
+			combinedEffectOnTarget(player)
+		end
+	end)
 end
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-	
-	local key = input.KeyCode
-	
-	if key == Enum.KeyCode.K then
-		print("K key pressed, targeting user: " .. TARGET_USER_ID)
-		targetByUserId(TARGET_USER_ID)
-	end
-end)
-
-_G.combinedEffect = combinedEffectOnTarget
 _G.stopCombined = stopEffect
-_G.targetUser = targetByUserId
-
-print("Script loaded. Set TARGET_USER_ID to the correct ID. Current: " .. TARGET_USER_ID)
-print("Press K to target and effect the player")

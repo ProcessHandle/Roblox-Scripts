@@ -1,15 +1,19 @@
+-- DO NOT set a default here - let _G.TargetId control it
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local localPlayer = Players.LocalPlayer
 
+-- Use _G.TargetId directly, NO fallback default
 local TARGET_USER_ID = _G.TargetId
 
+-- If still nil, wait a moment and try again
 if not TARGET_USER_ID then
     task.wait(0.2)
     TARGET_USER_ID = _G.TargetId
 end
 
+-- Final check - if still nil, error
 if not TARGET_USER_ID then
     error("You must set _G.TargetId before loading the script!\nExample: _G.TargetId = 10107875918")
 end
@@ -28,7 +32,13 @@ local walkflinging = false
 local currentTarget = nil
 
 local function getRoot(char)
-	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
+end
+
+local function getCenterMass(char)
+	-- Try to get the center mass (chest/torso area for better collision)
+	local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+	return torso
 end
 
 local function isSpectator(plr)
@@ -87,6 +97,7 @@ local function stopAll()
 		local myRoot = getRoot(myChar)
 		if myRoot then
 			myRoot.Velocity = Vector3.new(0, 0, 0)
+			myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 		end
 	end
 	currentTarget = nil
@@ -118,11 +129,12 @@ local function startOnTarget(target)
 	
 	local targetChar = currentTarget.Character
 	if targetChar then
-		local targetRoot = getRoot(targetChar)
+		local targetCenter = getCenterMass(targetChar)
 		local myRoot = getRoot(myChar)
-		if targetRoot and myRoot then
-			print("[DEBUG] Step 2: Teleporting to head")
-			myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 1.6, 0)
+		if targetCenter and myRoot then
+			print("[DEBUG] Step 2: Teleporting to center mass")
+			-- Teleport directly into their torso/chest
+			myRoot.CFrame = targetCenter.CFrame * CFrame.new(0, 0, 1.5)
 			myHumanoid.Sit = true
 		end
 	end
@@ -132,44 +144,62 @@ local function startOnTarget(target)
 		
 		local myCurrChar = localPlayer.Character
 		local targetChar = currentTarget.Character
-		local targetRoot = getRoot(targetChar)
+		local targetCenter = getCenterMass(targetChar)
 		local myRoot = getRoot(myCurrChar)
 		local myHum = myCurrChar and myCurrChar:FindFirstChildOfClass("Humanoid")
 		
-		if targetRoot and myRoot and myHum and myHum.Sit == true then
-			myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 1.6, 0)
+		if targetCenter and myRoot and myHum and myHum.Sit == true then
+			-- Stay inside their center mass
+			myRoot.CFrame = targetCenter.CFrame * CFrame.new(0, 0, 1.5)
 		end
 	end)
 	
 	task.wait(0.3)
-	print("[DEBUG] Step 3: Starting fling")
+	print("[DEBUG] Step 3: Starting MEGA fling")
 	
 	walkflinging = true
 	task.spawn(function()
+		local iter = 0
 		while walkflinging and currentTarget do
 			local myChar = localPlayer.Character
 			local myRoot = getRoot(myChar)
 			local targetChar = currentTarget and currentTarget.Character
-			local targetRoot = targetChar and getRoot(targetChar)
+			local targetCenter = targetChar and getCenterMass(targetChar)
 			
-			if myRoot and targetRoot then
-				local direction = (targetRoot.Position - myRoot.Position).Unit
-				local vel, movel = nil, 0.1
+			if myRoot and targetCenter then
+				iter = iter + 1
 				
-				myRoot.Velocity = direction * 10000 + Vector3.new(0, 10000, 0)
+				-- Calculate direction to target center
+				local direction = (targetCenter.Position - myRoot.Position).Unit
 				
-				task.wait()
-				if myRoot and myRoot.Parent and walkflinging then
-					myRoot.Velocity = vel or Vector3.new()
+				-- MEGA FLING - Much stronger velocities
+				local megaVelocity = direction * 50000 + Vector3.new(0, 25000, 0)
+				
+				-- Multiple velocity methods for better effect
+				myRoot.Velocity = megaVelocity
+				myRoot.AssemblyLinearVelocity = megaVelocity
+				
+				-- Also apply angular velocity for spin
+				myRoot.AssemblyAngularVelocity = Vector3.new(
+					math.random(-500, 500),
+					math.random(-500, 500),
+					math.random(-500, 500)
+				)
+				
+				if iter % 5 == 0 then
+					print("[DEBUG] MEGA FLING #" .. iter .. " - Velocity: " .. tostring(megaVelocity.Magnitude))
 				end
 				
-				task.wait()
-				if myRoot and myRoot.Parent and walkflinging then
-					myRoot.Velocity = (vel or Vector3.new()) + Vector3.new(0, movel, 0)
-					movel = movel * -1
-				end
+				task.wait(0.05)
+				
+				-- Second burst in opposite direction for chaotic fling
+				local reverseDirection = (myRoot.Position - targetCenter.Position).Unit
+				myRoot.Velocity = reverseDirection * 30000 + Vector3.new(0, 15000, 0)
+				myRoot.AssemblyLinearVelocity = reverseDirection * 30000 + Vector3.new(0, 15000, 0)
+				
+				task.wait(0.05)
 			end
-			task.wait()
+			task.wait(0.03) -- Faster iterations for more constant pressure
 		end
 	end)
 	
@@ -232,7 +262,6 @@ end)
 local function findAndStart()
 	print("[DEBUG] Looking for target with User ID: " .. TARGET_USER_ID)
 	
-	-- Print all players for debugging
 	local allPlayers = Players:GetPlayers()
 	print("[DEBUG] Current players in server:")
 	for _, plr in pairs(allPlayers) do
@@ -251,7 +280,7 @@ local function findAndStart()
 		print("[DEBUG] Found target: " .. target.Name)
 		startOnTarget(target)
 	else
-		print("[DEBUG] Target " .. TARGET_USER_ID .. " not found in current server, waiting...")
+		print("[DEBUG] Target " .. TARGET_USER_ID .. " not found, waiting...")
 		local conn
 		conn = Players.PlayerAdded:Connect(function(plr)
 			print("[DEBUG] Player joined: " .. plr.Name .. " (ID: " .. plr.UserId .. ")")
@@ -279,8 +308,10 @@ _G.setTarget = function(userId)
 	findAndStart()
 end
 
-print("=== Script Loaded ===")
+print("=== MEGA FLING SCRIPT LOADED ===")
 print("Current Target ID: " .. TARGET_USER_ID)
+print("Fling Strength: 50000 velocity (MEGA)")
+print("Target: Center mass (torso/chest)")
 print("To change target: _G.setTarget(USER_ID)")
 print("To stop: _G.stop()")
 print("To restart: _G.restart()")

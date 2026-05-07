@@ -1,7 +1,20 @@
+_G.TargetId = 2632374645 -- Change this to your target's User ID
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local localPlayer = Players.LocalPlayer
+
+local TARGET_USER_ID = _G.TargetId or 2632374645
+
+local blacklist = {
+  1288458401,
+  910140467,
+  8609879786,
+  276351174,
+  4538128446,
+  2861657607,
+}
 
 local headSit = nil
 local walkflinging = false
@@ -42,28 +55,13 @@ local function ragdollPlayer(plr)
 					remote = remote:FindFirstChild("RemoteEvent")
 					if remote then
 						remote:FireServer(unpack(args))
-						print("[DEBUG] Ragdoll remote fired")
 						return true
 					end
 				end
 			end
 		end
 	end
-	print("[WARN] Could not find ragdoll remote")
 	return false
-end
-
-local function getRandomNonSpectator()
-	local valid = {}
-	for _, plr in pairs(Players:GetPlayers()) do
-		if plr ~= localPlayer and not isSpectator(plr) and plr.Character and getRoot(plr.Character) then
-			table.insert(valid, plr)
-		end
-	end
-	if #valid > 0 then
-		return valid[math.random(1, #valid)]
-	end
-	return nil
 end
 
 local function stopAll()
@@ -93,6 +91,11 @@ local function startOnTarget(target)
 	stopAll()
 	currentTarget = target
 	
+	if isSpectator(target) then
+		print("[DEBUG] Target is spectator, stopping")
+		return
+	end
+	
 	print("[DEBUG] Step 1: Ragdolling " .. target.Name)
 	ragdollPlayer(target)
 	task.wait(0.5)
@@ -106,7 +109,6 @@ local function startOnTarget(target)
 	local myHumanoid = myChar:FindFirstChildOfClass("Humanoid")
 	if not myHumanoid then return end
 	
-	-- Make YOU sit on their head
 	local targetChar = currentTarget.Character
 	if targetChar then
 		local targetRoot = getRoot(targetChar)
@@ -118,7 +120,6 @@ local function startOnTarget(target)
 		end
 	end
 	
-	-- Headsit - keep you on their head
 	headSit = RunService.Heartbeat:Connect(function()
 		if not currentTarget or not currentTarget.Character then return end
 		
@@ -133,13 +134,11 @@ local function startOnTarget(target)
 		end
 	end)
 	
-	-- Walkfling - fling YOUR character into them
 	task.wait(0.3)
 	print("[DEBUG] Step 3: Starting fling")
 	
 	walkflinging = true
 	task.spawn(function()
-		local iter = 0
 		while walkflinging and currentTarget do
 			local myChar = localPlayer.Character
 			local myRoot = getRoot(myChar)
@@ -148,11 +147,8 @@ local function startOnTarget(target)
 			
 			if myRoot and targetRoot then
 				local direction = (targetRoot.Position - myRoot.Position).Unit
-				
-				iter = iter + 1
 				local vel, movel = nil, 0.1
 				
-				-- Massive velocity spike into them
 				myRoot.Velocity = direction * 10000 + Vector3.new(0, 10000, 0)
 				
 				task.wait()
@@ -170,10 +166,9 @@ local function startOnTarget(target)
 		end
 	end)
 	
-	-- Stop if target dies or becomes spectator
 	local function checkTargetLost()
 		if currentTarget and (not currentTarget.Character or isSpectator(currentTarget)) then
-			print("[DEBUG] Target lost, stopping")
+			print("[DEBUG] Target lost or became spectator, stopping")
 			stopAll()
 		end
 	end
@@ -188,41 +183,72 @@ local function startOnTarget(target)
 	currentTarget:GetPropertyChangedSignal("Team"):Connect(checkTargetLost)
 end
 
-local function start()
-	print("[DEBUG] Looking for target...")
-	local target = getRandomNonSpectator()
+local kickQueue = {}
+local processingKick = false
+
+local function processKickQueue()
+	if processingKick then return end
+	processingKick = true
+	
+	while #kickQueue > 0 do
+		local player = table.remove(kickQueue, 1)
+		if player and player.Parent then
+			print("[KICK] Blacklisted player joined: " .. player.Name)
+			localPlayer:Kick("Safety kick: Blacklisted player joined - " .. player.Name)
+		end
+		task.wait()
+	end
+	
+	processingKick = false
+end
+
+for _, userId in pairs(blacklist) do
+	task.spawn(function()
+		local player = Players:FindFirstChild(tostring(userId))
+		if player then
+			table.insert(kickQueue, player)
+			processKickQueue()
+		end
+	end)
+end
+
+Players.PlayerAdded:Connect(function(player)
+	for _, userId in pairs(blacklist) do
+		if player.UserId == userId then
+			table.insert(kickQueue, player)
+			task.spawn(processKickQueue)
+			break
+		end
+	end
+end)
+
+local function findAndStart()
+	local target = Players:FindFirstChild(tostring(TARGET_USER_ID))
 	if target then
 		print("[DEBUG] Found target: " .. target.Name)
 		startOnTarget(target)
 	else
-		print("[DEBUG] No target, waiting for player...")
+		print("[DEBUG] Target not found, waiting for " .. TARGET_USER_ID .. " to join...")
 		local conn
 		conn = Players.PlayerAdded:Connect(function(plr)
-			if plr ~= localPlayer and not isSpectator(plr) then
-				print("[DEBUG] Player joined: " .. plr.Name)
+			if plr.UserId == TARGET_USER_ID then
+				print("[DEBUG] Target joined: " .. plr.Name)
 				conn:Disconnect()
-				task.wait(1)
+				task.wait(2)
 				startOnTarget(plr)
 			end
 		end)
 	end
 end
 
-start()
-
-RunService.Heartbeat:Connect(function()
-	if not walkflinging and not headSit and currentTarget == nil then
-		local newTarget = getRandomNonSpectator()
-		if newTarget then startOnTarget(newTarget) end
-	end
-end)
+findAndStart()
 
 _G.stop = stopAll
-_G.restart = start
+_G.restart = findAndStart
 
 print("=== Script Loaded ===")
-print("Step 1: Ragdolls target player")
-print("Step 2: Sits on their head")
-print("Step 3: Flings into them repeatedly")
+print("Set _G.TargetId before loading to change target")
+print("Current Target ID: " .. TARGET_USER_ID)
+print("Blacklist count: " .. #blacklist)
 print("Type _G.stop() to stop")
 print("Type _G.restart() to restart")

@@ -60,7 +60,12 @@ end
 
 local function combinedEffect(targetPlayer)
 	if not targetPlayer then return end
-	if isSpectator(targetPlayer) then return end
+	
+	-- Check if target is spectator first
+	if isSpectator(targetPlayer) then
+		print("Target is on spectators team, skipping")
+		return
+	end
 	
 	stopEffect()
 	currentTarget = targetPlayer
@@ -77,8 +82,12 @@ local function combinedEffect(targetPlayer)
 	if not humanoid then return end
 	
 	isRunning = true
+	print("Starting combined effect on: " .. currentTarget.Name)
+	
+	-- Make target sit
 	humanoid.Sit = true
 	
+	-- Head sit - constantly teleport to chosen player's head
 	headSitConnection = RunService.Heartbeat:Connect(function()
 		if not isRunning or not currentTarget or not currentTarget.Character then
 			if headSitConnection then headSitConnection:Disconnect() end
@@ -87,45 +96,87 @@ local function combinedEffect(targetPlayer)
 		local currentChar = currentTarget.Character
 		local currentHumanoid = currentChar:FindFirstChildOfClass("Humanoid")
 		if currentChar and getRoot(currentChar) and currentHumanoid and currentHumanoid.Sit == true then
+			-- Teleport to player's head position
 			getRoot(currentChar).CFrame = getRoot(currentChar).CFrame * CFrame.new(0, 1.6, 0.4)
 		end
 	end)
 	
+	-- Walk fling - exactly as in Infinite Yield
 	task.spawn(function()
 		walkflinging = true
-		while isRunning and currentTarget do
-			task.wait()
-			local character = currentTarget.Character
-			local root = getRoot(character)
+		-- Enable noclip first
+		if Noclipping then Noclipping:Disconnect() end
+		Clip = false
+		local function NoclipLoop()
+			if Clip == false and currentTarget and currentTarget.Character then
+				for _, child in pairs(currentTarget.Character:GetDescendants()) do
+					if child:IsA("BasePart") and child.CanCollide == true then
+						child.CanCollide = false
+					end
+				end
+			end
+		end
+		local noclipConnection = RunService.Stepped:Connect(NoclipLoop)
+		
+		repeat 
+			RunService.Heartbeat:Wait()
+			local character = currentTarget and currentTarget.Character
+			local root = character and getRoot(character)
 			local vel, movel = nil, 0.1
-			
+
 			while not (character and character.Parent and root and root.Parent) do
-				task.wait()
-				character = currentTarget.Character
-				root = getRoot(character)
+				RunService.Heartbeat:Wait()
+				character = currentTarget and currentTarget.Character
+				root = character and getRoot(character)
 				if not isRunning then return end
 			end
-			
+
 			vel = root.Velocity
 			root.Velocity = vel * 10000 + Vector3.new(0, 10000, 0)
-			task.wait()
+
+			RunService.RenderStepped:Wait()
 			if character and character.Parent and root and root.Parent and isRunning then
 				root.Velocity = vel
 			end
-			task.wait()
+
+			RunService.Stepped:Wait()
 			if character and character.Parent and root and root.Parent and isRunning then
 				root.Velocity = vel + Vector3.new(0, movel, 0)
 				movel = movel * -1
 			end
+		until not isRunning or not walkflinging
+		
+		noclipConnection:Disconnect()
+		-- Re-enable collision
+		if currentTarget and currentTarget.Character then
+			for _, child in pairs(currentTarget.Character:GetDescendants()) do
+				if child:IsA("BasePart") then
+					child.CanCollide = true
+				end
+			end
 		end
-		walkflinging = false
 	end)
 	
+	-- Stop if target dies
 	humanoid.Died:Connect(function()
-		if isRunning then stopEffect() end
+		if isRunning then
+			print("Target died, stopping effect")
+			stopEffect()
+		end
+	end)
+	
+	-- Also stop if target becomes spectator
+	local teamCheck
+	teamCheck = currentTarget:GetPropertyChangedSignal("Team"):Connect(function()
+		if isSpectator(currentTarget) then
+			print("Target became spectator, stopping effect")
+			stopEffect()
+			teamCheck:Disconnect()
+		end
 	end)
 end
 
+-- Kick system for blacklisted players
 local kickQueue = {}
 local processingKick = false
 
@@ -162,6 +213,7 @@ Players.PlayerAdded:Connect(function(player)
 	end
 end)
 
+-- Target the specific user
 local TARGET_USER_ID = 2632374645
 
 local function startOnTarget(userId)
@@ -173,7 +225,7 @@ local function startOnTarget(userId)
 		conn = Players.PlayerAdded:Connect(function(player)
 			if player.UserId == userId then
 				conn:Disconnect()
-				task.wait(1)
+				task.wait(2)
 				combinedEffect(player)
 			end
 		end)
@@ -181,4 +233,10 @@ local function startOnTarget(userId)
 end
 
 startOnTarget(TARGET_USER_ID)
+
 _G.stopEffect = stopEffect
+_G.checkSpectator = isSpectator
+
+print("Script loaded. Targeting User ID: " .. TARGET_USER_ID)
+print("Type _G.stopEffect() to stop the effect")
+print("Type _G.checkSpectator(Players.PlayerName) to check if someone is spectator")

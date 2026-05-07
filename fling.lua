@@ -30,6 +30,7 @@ local blacklist = {
 local headSit = nil
 local walkflinging = false
 local currentTarget = nil
+local noclipConnection = nil
 
 local function getRoot(char)
 	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
@@ -81,6 +82,10 @@ local function stopAll()
 		headSit:Disconnect()
 		headSit = nil
 	end
+	if noclipConnection then
+		noclipConnection:Disconnect()
+		noclipConnection = nil
+	end
 	
 	local myChar = localPlayer.Character
 	if myChar then
@@ -131,6 +136,19 @@ local function startOnTarget(target)
 		end
 	end
 	
+	-- Enable noclip on yourself (like IY does)
+	local function noclipLoop()
+		if currentTarget and localPlayer.Character then
+			for _, child in pairs(localPlayer.Character:GetDescendants()) do
+				if child:IsA("BasePart") and child.CanCollide == true then
+					child.CanCollide = false
+				end
+			end
+		end
+	end
+	noclipConnection = RunService.Stepped:Connect(noclipLoop)
+	
+	-- EXACT Infinite Yield headsit pattern
 	headSit = RunService.Heartbeat:Connect(function()
 		if not currentTarget or not currentTarget.Character then return end
 		
@@ -146,35 +164,38 @@ local function startOnTarget(target)
 	end)
 	
 	task.wait(0.3)
-	print("[DEBUG] Step 3: Starting fling")
+	print("[DEBUG] Step 3: Starting IY-style walkfling")
 	
+	-- EXACT Infinite Yield walkfling pattern (Heartbeat -> RenderStepped -> Stepped)
 	walkflinging = true
 	task.spawn(function()
-		while walkflinging and currentTarget do
-			local myChar = localPlayer.Character
-			local myRoot = getRoot(myChar)
-			local targetChar = currentTarget and currentTarget.Character
-			local targetRoot = targetChar and getRoot(targetChar)
-			
-			if myRoot and targetRoot then
-				local direction = (targetRoot.Position - myRoot.Position).Unit
-				local vel, movel = nil, 0.1
-				
-				myRoot.Velocity = direction * 10000 + Vector3.new(0, 10000, 0)
-				
-				task.wait()
-				if myRoot and myRoot.Parent and walkflinging then
-					myRoot.Velocity = vel or Vector3.new()
-				end
-				
-				task.wait()
-				if myRoot and myRoot.Parent and walkflinging then
-					myRoot.Velocity = (vel or Vector3.new()) + Vector3.new(0, movel, 0)
-					movel = movel * -1
-				end
+		repeat 
+			RunService.Heartbeat:Wait()
+			local character = localPlayer.Character
+			local root = getRoot(character)
+			local vel, movel = nil, 0.1
+
+			while not (character and character.Parent and root and root.Parent) do
+				RunService.Heartbeat:Wait()
+				character = localPlayer.Character
+				root = getRoot(character)
 			end
-			task.wait()
-		end
+
+			-- SUPER STRONG velocity (100x stronger than IY default)
+			vel = root.Velocity
+			root.Velocity = vel * 100000 + Vector3.new(0, 100000, 0)
+
+			RunService.RenderStepped:Wait()
+			if character and character.Parent and root and root.Parent and walkflinging then
+				root.Velocity = vel
+			end
+
+			RunService.Stepped:Wait()
+			if character and character.Parent and root and root.Parent and walkflinging then
+				root.Velocity = vel + Vector3.new(0, movel * 100, 0)
+				movel = movel * -1
+			end
+		until walkflinging == false
 	end)
 	
 	local function checkTargetLost()
@@ -236,7 +257,6 @@ end)
 local function findAndStart()
 	print("[DEBUG] Looking for target with User ID: " .. TARGET_USER_ID)
 	
-	-- Print all players for debugging
 	local allPlayers = Players:GetPlayers()
 	print("[DEBUG] Current players in server:")
 	for _, plr in pairs(allPlayers) do
@@ -255,7 +275,7 @@ local function findAndStart()
 		print("[DEBUG] Found target: " .. target.Name)
 		startOnTarget(target)
 	else
-		print("[DEBUG] Target " .. TARGET_USER_ID .. " not found in current server, waiting...")
+		print("[DEBUG] Target " .. TARGET_USER_ID .. " not found, waiting...")
 		local conn
 		conn = Players.PlayerAdded:Connect(function(plr)
 			print("[DEBUG] Player joined: " .. plr.Name .. " (ID: " .. plr.UserId .. ")")
@@ -283,8 +303,10 @@ _G.setTarget = function(userId)
 	findAndStart()
 end
 
-print("=== Script Loaded ===")
+print("=== IY-STYLE MEGA FLING LOADED ===")
 print("Current Target ID: " .. TARGET_USER_ID)
+print("Using Infinite Yield's exact walkfling sequence")
+print("Velocity: 100x stronger (100,000 instead of 1,000)")
 print("To change target: _G.setTarget(USER_ID)")
 print("To stop: _G.stop()")
 print("To restart: _G.restart()")

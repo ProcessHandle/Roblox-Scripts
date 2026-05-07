@@ -2,12 +2,12 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local localPlayer = Players.LocalPlayer
 
-local target = nil
-local headSitConnection = nil
 local walkflinging = false
+local headSitConnection = nil
+local currentTarget = nil
 
 local function getRoot(char)
-	return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
 end
 
 local function isSpectator(plr)
@@ -36,75 +36,72 @@ local function getRandomTarget()
 	return nil
 end
 
-local function stop()
+local function stopEffect()
 	walkflinging = false
 	if headSitConnection then
 		headSitConnection:Disconnect()
 		headSitConnection = nil
 	end
-	if target and target.Character then
-		local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid.Sit = false
-		end
-		local root = getRoot(target.Character)
-		if root then
-			root.Velocity = Vector3.new(0, 0, 0)
-		end
+	if currentTarget and currentTarget.Character then
+		local hum = currentTarget.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum.Sit = false end
+		local root = getRoot(currentTarget.Character)
+		if root then root.Velocity = Vector3.new(0, 0, 0) end
 	end
-	print("Stopped")
+	currentTarget = nil
 end
 
-local function start()
-	stop()
-	target = getRandomTarget()
-	if not target then
-		print("No target found")
+local function startEffect()
+	stopEffect()
+	
+	currentTarget = getRandomTarget()
+	if not currentTarget then
+		print("No valid target found")
 		return
 	end
 	
-	print("Targeting: " .. target.Name)
+	print("Targeting: " .. currentTarget.Name)
 	
-	local char = target.Character
+	local char = currentTarget.Character
 	if not char then
-		char = target.CharacterAdded:Wait()
+		char = currentTarget.CharacterAdded:Wait()
 		task.wait(0.5)
 	end
 	
 	local humanoid = char:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
-		print("No humanoid")
+	local rootPart = getRoot(char)
+	
+	if not humanoid or not rootPart then
+		print("Missing humanoid or root part")
 		return
 	end
 	
-	-- Make them sit
 	humanoid.Sit = true
 	
-	-- Head sit (teleports them onto their own head)
 	headSitConnection = RunService.Heartbeat:Connect(function()
-		if target and target.Character then
-			local currChar = target.Character
-			local root = getRoot(currChar)
-			local hum = currChar:FindFirstChildOfClass("Humanoid")
-			if root and hum and hum.Sit == true then
-				root.CFrame = root.CFrame * CFrame.new(0, 1.6, 0.4)
+		if currentTarget and currentTarget.Character then
+			local currChar = currentTarget.Character
+			local currRoot = getRoot(currChar)
+			local currHum = currChar:FindFirstChildOfClass("Humanoid")
+			if currRoot and currHum and currHum.Sit == true then
+				currRoot.CFrame = currRoot.CFrame * CFrame.new(0, 1.6, 0.4)
 			end
 		end
 	end)
 	
-	-- Walk fling (exact copy from Infinite Yield)
 	walkflinging = true
+	
 	task.spawn(function()
 		repeat 
 			RunService.Heartbeat:Wait()
-			local character = target.Character
-			local root = getRoot(character)
+			local character = currentTarget and currentTarget.Character
+			local root = character and getRoot(character)
 			local vel, movel = nil, 0.1
 
 			while not (character and character.Parent and root and root.Parent) do
 				RunService.Heartbeat:Wait()
-				character = target.Character
-				root = getRoot(character)
+				character = currentTarget and currentTarget.Character
+				root = character and getRoot(character)
 			end
 
 			vel = root.Velocity
@@ -123,25 +120,15 @@ local function start()
 		until walkflinging == false
 	end)
 	
-	-- Auto stop if they become spectator or die
-	task.spawn(function()
-		while walkflinging and target do
-			task.wait(0.5)
-			if not target.Character or isSpectator(target) then
-				print("Target is now spectator or dead, stopping")
-				stop()
-				break
-			end
-		end
+	humanoid.Died:Connect(function()
+		if walkflinging then stopEffect() end
 	end)
 end
 
--- Start immediately
-start()
+startEffect()
 
-_G.stop = stop
-_G.restart = start
+_G.stop = stopEffect
+_G.restart = startEffect
 
-print("Script loaded! Targeting random player")
-print("Type _G.stop() to stop")
-print("Type _G.restart() to pick a new target")
+print("Script loaded - using Infinite Yield's exact walkfling method")
+print("Type _G.stop() to stop, _G.restart() to restart")

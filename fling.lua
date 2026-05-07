@@ -32,7 +32,7 @@ local walkflinging = false
 local currentTarget = nil
 
 local function getRoot(char)
-	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
+	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
 end
 
 local function isSpectator(plr)
@@ -91,7 +91,6 @@ local function stopAll()
 		local myRoot = getRoot(myChar)
 		if myRoot then
 			myRoot.Velocity = Vector3.new(0, 0, 0)
-			myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 		end
 	end
 	currentTarget = nil
@@ -147,11 +146,10 @@ local function startOnTarget(target)
 	end)
 	
 	task.wait(0.3)
-	print("[DEBUG] Step 3: Starting MEGA FLING")
+	print("[DEBUG] Step 3: Starting fling")
 	
 	walkflinging = true
 	task.spawn(function()
-		local iter = 0
 		while walkflinging and currentTarget do
 			local myChar = localPlayer.Character
 			local myRoot = getRoot(myChar)
@@ -162,44 +160,20 @@ local function startOnTarget(target)
 				local direction = (targetRoot.Position - myRoot.Position).Unit
 				local vel, movel = nil, 0.1
 				
-				iter = iter + 1
+				myRoot.Velocity = direction * 10000 + Vector3.new(0, 10000, 0)
 				
-				-- MEGA STRONGER FLING - 100x stronger
-				local megaVel = direction * 100000 + Vector3.new(0, 50000, 0)
-				
-				-- Multiple velocity methods
-				myRoot.Velocity = megaVel
-				myRoot.AssemblyLinearVelocity = megaVel
-				
-				-- Add angular velocity for spin
-				myRoot.AssemblyAngularVelocity = Vector3.new(
-					math.random(-2000, 2000),
-					math.random(-2000, 2000),
-					math.random(-2000, 2000)
-				)
-				
-				if iter % 5 == 0 then
-					print("[DEBUG] MEGA FLING #" .. iter .. " - Speed: " .. math.floor(megaVel.Magnitude))
+				task.wait()
+				if myRoot and myRoot.Parent and walkflinging then
+					myRoot.Velocity = vel or Vector3.new()
 				end
 				
-				task.wait(0.05)
-				
-				-- Second burst for double impact
+				task.wait()
 				if myRoot and myRoot.Parent and walkflinging then
-					myRoot.Velocity = megaVel * 2
-					myRoot.AssemblyLinearVelocity = megaVel * 2
-				end
-				
-				task.wait(0.05)
-				
-				-- Reset and alternate for continuous fling
-				if myRoot and myRoot.Parent and walkflinging then
-					local altVel = direction * 80000 + Vector3.new(0, -30000, 0)
-					myRoot.Velocity = altVel
-					myRoot.AssemblyLinearVelocity = altVel
+					myRoot.Velocity = (vel or Vector3.new()) + Vector3.new(0, movel, 0)
+					movel = movel * -1
 				end
 			end
-			task.wait(0.03)
+			task.wait()
 		end
 	end)
 	
@@ -262,6 +236,7 @@ end)
 local function findAndStart()
 	print("[DEBUG] Looking for target with User ID: " .. TARGET_USER_ID)
 	
+	-- Print all players for debugging
 	local allPlayers = Players:GetPlayers()
 	print("[DEBUG] Current players in server:")
 	for _, plr in pairs(allPlayers) do
@@ -308,9 +283,8 @@ _G.setTarget = function(userId)
 	findAndStart()
 end
 
-print("=== MEGA FLING SCRIPT LOADED ===")
+print("=== Script Loaded ===")
 print("Current Target ID: " .. TARGET_USER_ID)
-print("Fling Strength: 100,000+ velocity (10x stronger)")
 print("To change target: _G.setTarget(USER_ID)")
 print("To stop: _G.stop()")
 print("To restart: _G.restart()")

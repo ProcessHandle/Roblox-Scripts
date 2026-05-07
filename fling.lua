@@ -32,24 +32,7 @@ local walkflinging = false
 local currentTarget = nil
 
 local function getRoot(char)
-	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
-end
-
-local function getCenterMass(char)
-	-- Get the true center of the character (between root and head)
-	local root = getRoot(char)
-	local head = char:FindFirstChild("Head")
-	
-	if root and head then
-		-- Calculate actual center point between root and head
-		local centerPos = (root.Position + head.Position) / 2
-		-- Create a fake CFrame at center position facing same direction as root
-		return CFrame.new(centerPos, centerPos + root.CFrame.LookVector)
-	elseif root then
-		return root.CFrame
-	else
-		return nil
-	end
+	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
 end
 
 local function isSpectator(plr)
@@ -108,7 +91,6 @@ local function stopAll()
 		local myRoot = getRoot(myChar)
 		if myRoot then
 			myRoot.Velocity = Vector3.new(0, 0, 0)
-			myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 		end
 	end
 	currentTarget = nil
@@ -140,12 +122,11 @@ local function startOnTarget(target)
 	
 	local targetChar = currentTarget.Character
 	if targetChar then
-		local targetCenterCFrame = getCenterMass(targetChar)
+		local targetRoot = getRoot(targetChar)
 		local myRoot = getRoot(myChar)
-		if targetCenterCFrame and myRoot then
-			print("[DEBUG] Step 2: Teleporting to center mass")
-			-- Teleport DIRECTLY into their center (zero offset)
-			myRoot.CFrame = targetCenterCFrame
+		if targetRoot and myRoot then
+			print("[DEBUG] Step 2: Teleporting to head")
+			myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 1.6, 0)
 			myHumanoid.Sit = true
 		end
 	end
@@ -155,73 +136,44 @@ local function startOnTarget(target)
 		
 		local myCurrChar = localPlayer.Character
 		local targetChar = currentTarget.Character
-		local targetCenterCFrame = getCenterMass(targetChar)
+		local targetRoot = getRoot(targetChar)
 		local myRoot = getRoot(myCurrChar)
 		local myHum = myCurrChar and myCurrChar:FindFirstChildOfClass("Humanoid")
 		
-		if targetCenterCFrame and myRoot and myHum and myHum.Sit == true then
-			-- Stay INSIDE their center (no offset)
-			myRoot.CFrame = targetCenterCFrame
+		if targetRoot and myRoot and myHum and myHum.Sit == true then
+			myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 1.6, 0)
 		end
 	end)
 	
 	task.wait(0.3)
-	print("[DEBUG] Step 3: Starting MEGA fling (center mass penetration)")
+	print("[DEBUG] Step 3: Starting fling")
 	
 	walkflinging = true
 	task.spawn(function()
-		local iter = 0
 		while walkflinging and currentTarget do
 			local myChar = localPlayer.Character
 			local myRoot = getRoot(myChar)
 			local targetChar = currentTarget and currentTarget.Character
-			local targetCenter = targetChar and getCenterMass(targetChar)
+			local targetRoot = targetChar and getRoot(targetChar)
 			
-			if myRoot and targetCenter then
-				iter = iter + 1
+			if myRoot and targetRoot then
+				local direction = (targetRoot.Position - myRoot.Position).Unit
+				local vel, movel = nil, 0.1
 				
-				-- Calculate direction FROM inside their body outward
-				-- We're already inside them, so we need to push OUTWARD in all directions
-				local outwardDirection = (myRoot.Position - targetCenter.Position).Unit
+				myRoot.Velocity = direction * 10000 + Vector3.new(0, 10000, 0)
 				
-				-- If we're perfectly centered, pick a random direction
-				if outwardDirection.Magnitude < 0.5 then
-					outwardDirection = Vector3.new(math.random(-1, 1), math.random(-1, 1), math.random(-1, 1)).Unit
+				task.wait()
+				if myRoot and myRoot.Parent and walkflinging then
+					myRoot.Velocity = vel or Vector3.new()
 				end
 				
-				-- MEGA FLING - Explode outward from their center
-				local megaVelocity = outwardDirection * 75000 + Vector3.new(0, 50000, 0)
-				
-				-- Multiple velocity methods for better effect
-				myRoot.Velocity = megaVelocity
-				myRoot.AssemblyLinearVelocity = megaVelocity
-				
-				-- Apply spin
-				myRoot.AssemblyAngularVelocity = Vector3.new(
-					math.random(-1000, 1000),
-					math.random(-1000, 1000),
-					math.random(-1000, 1000)
-				)
-				
-				if iter % 5 == 0 then
-					print("[DEBUG] MEGA FLING #" .. iter .. " - Direction: " .. tostring(outwardDirection) .. " Velocity: " .. tostring(megaVelocity.Magnitude))
+				task.wait()
+				if myRoot and myRoot.Parent and walkflinging then
+					myRoot.Velocity = (vel or Vector3.new()) + Vector3.new(0, movel, 0)
+					movel = movel * -1
 				end
-				
-				task.wait(0.03)
-				
-				-- Second burst - opposite direction for chaos
-				local oppositeDirection = -outwardDirection
-				myRoot.Velocity = oppositeDirection * 50000 + Vector3.new(0, -25000, 0)
-				myRoot.AssemblyLinearVelocity = oppositeDirection * 50000 + Vector3.new(0, -25000, 0)
-				
-				task.wait(0.03)
-				
-				-- Third burst - random direction
-				local randomDir = Vector3.new(math.random(-1, 1), math.random(-1, 1), math.random(-1, 1)).Unit
-				myRoot.Velocity = randomDir * 60000
-				myRoot.AssemblyLinearVelocity = randomDir * 60000
 			end
-			task.wait(0.02)
+			task.wait()
 		end
 	end)
 	
@@ -284,6 +236,7 @@ end)
 local function findAndStart()
 	print("[DEBUG] Looking for target with User ID: " .. TARGET_USER_ID)
 	
+	-- Print all players for debugging
 	local allPlayers = Players:GetPlayers()
 	print("[DEBUG] Current players in server:")
 	for _, plr in pairs(allPlayers) do
@@ -302,7 +255,7 @@ local function findAndStart()
 		print("[DEBUG] Found target: " .. target.Name)
 		startOnTarget(target)
 	else
-		print("[DEBUG] Target " .. TARGET_USER_ID .. " not found, waiting...")
+		print("[DEBUG] Target " .. TARGET_USER_ID .. " not found in current server, waiting...")
 		local conn
 		conn = Players.PlayerAdded:Connect(function(plr)
 			print("[DEBUG] Player joined: " .. plr.Name .. " (ID: " .. plr.UserId .. ")")
@@ -330,10 +283,8 @@ _G.setTarget = function(userId)
 	findAndStart()
 end
 
-print("=== CENTER MASS PENETRATION FLING LOADED ===")
+print("=== Script Loaded ===")
 print("Current Target ID: " .. TARGET_USER_ID)
-print("Position: DIRECTLY INSIDE target's center mass (between root and head)")
-print("Fling: 75,000 velocity exploding OUTWARD from their center")
 print("To change target: _G.setTarget(USER_ID)")
 print("To stop: _G.stop()")
 print("To restart: _G.restart()")

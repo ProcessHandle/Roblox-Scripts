@@ -1,22 +1,27 @@
--- DO NOT set a default here - let _G.TargetId control it
+-- MODE SELECTION
+-- Set this before loading script:
+-- _G.Mode = "Specific"  -- Target a specific user by ID
+-- _G.Mode = "Killers"   -- Target everyone on team "Killers"
+-- _G.TargetId = 10107875918  -- Only needed for Specific mode
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local localPlayer = Players.LocalPlayer
 
--- Use _G.TargetId directly, NO fallback default
+local MODE = _G.Mode or "Specific"
 local TARGET_USER_ID = _G.TargetId
 
--- If still nil, wait a moment and try again
-if not TARGET_USER_ID then
+if MODE == "Specific" and not TARGET_USER_ID then
     task.wait(0.2)
     TARGET_USER_ID = _G.TargetId
 end
 
--- Final check - if still nil, error
-if not TARGET_USER_ID then
+if MODE == "Specific" and not TARGET_USER_ID then
     error("You must set _G.TargetId before loading the script!\nExample: _G.TargetId = 10107875918")
 end
+
+print("[MODE] Running in " .. MODE .. " mode")
 
 local blacklist = {
   1288458401,
@@ -31,6 +36,7 @@ local headSit = nil
 local walkflinging = false
 local currentTarget = nil
 local noclipConnection = nil
+local killersQueue = {}
 
 local function getRoot(char)
 	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
@@ -136,7 +142,6 @@ local function startOnTarget(target)
 		end
 	end
 	
-	-- Enable noclip on yourself (like IY does)
 	local function noclipLoop()
 		if currentTarget and localPlayer.Character then
 			for _, child in pairs(localPlayer.Character:GetDescendants()) do
@@ -148,7 +153,6 @@ local function startOnTarget(target)
 	end
 	noclipConnection = RunService.Stepped:Connect(noclipLoop)
 	
-	-- EXACT Infinite Yield headsit pattern
 	headSit = RunService.Heartbeat:Connect(function()
 		if not currentTarget or not currentTarget.Character then return end
 		
@@ -166,7 +170,6 @@ local function startOnTarget(target)
 	task.wait(0.3)
 	print("[DEBUG] Step 3: Starting IY-style walkfling")
 	
-	-- EXACT Infinite Yield walkfling pattern (Heartbeat -> RenderStepped -> Stepped)
 	walkflinging = true
 	task.spawn(function()
 		repeat 
@@ -181,7 +184,6 @@ local function startOnTarget(target)
 				root = getRoot(character)
 			end
 
-			-- SUPER STRONG velocity (100x stronger than IY default)
 			vel = root.Velocity
 			root.Velocity = vel * 100000 + Vector3.new(0, 100000, 0)
 
@@ -202,6 +204,19 @@ local function startOnTarget(target)
 		if currentTarget and (not currentTarget.Character or isSpectator(currentTarget)) then
 			print("[DEBUG] Target lost or became spectator, stopping")
 			stopAll()
+			
+			if MODE == "Killers" then
+				for i, killer in pairs(killersQueue) do
+					if killer == currentTarget then
+						table.remove(killersQueue, i)
+						break
+					end
+				end
+				if #killersQueue > 0 then
+					task.wait(1)
+					startOnTarget(killersQueue[1])
+				end
+			end
 		end
 	end
 	
@@ -213,6 +228,71 @@ local function startOnTarget(target)
 	end
 	
 	currentTarget:GetPropertyChangedSignal("Team"):Connect(checkTargetLost)
+end
+
+local function updateKillersQueue()
+	if MODE ~= "Killers" then return end
+	
+	local newKillers = {}
+	for _, plr in pairs(Players:GetPlayers()) do
+		if plr ~= localPlayer and plr.Team and plr.Team.Name == "Killers" then
+			if not isSpectator(plr) then
+				table.insert(newKillers, plr)
+			end
+		end
+	end
+	
+	local changed = false
+	if #newKillers ~= #killersQueue then
+		changed = true
+	else
+		for i, killer in pairs(newKillers) do
+			if killersQueue[i] ~= killer then
+				changed = true
+				break
+			end
+		end
+	end
+	
+	if changed then
+		killersQueue = newKillers
+		print("[KILLERS MODE] Updated killers queue. Found " .. #killersQueue .. " players on Killers team:")
+		for i, killer in pairs(killersQueue) do
+			print("  " .. i .. ". " .. killer.Name .. " (ID: " .. killer.UserId .. ")")
+		end
+		
+		if not currentTarget and #killersQueue > 0 then
+			startOnTarget(killersQueue[1])
+		end
+	end
+end
+
+if MODE == "Killers" then
+	updateKillersQueue()
+	
+	Players.PlayerAdded:Connect(function(plr)
+		task.wait(1)
+		updateKillersQueue()
+	end)
+	
+	Players.PlayerRemoving:Connect(function()
+		task.wait(0.5)
+		updateKillersQueue()
+	end)
+	
+	local function watchTeamChanges(plr)
+		if plr == localPlayer then return end
+		plr:GetPropertyChangedSignal("Team"):Connect(function()
+			task.wait(0.5)
+			updateKillersQueue()
+		end)
+	end
+	
+	for _, plr in pairs(Players:GetPlayers()) do
+		watchTeamChanges(plr)
+	end
+	
+	Players.PlayerAdded:Connect(watchTeamChanges)
 end
 
 local kickQueue = {}
@@ -255,58 +335,88 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 local function findAndStart()
-	print("[DEBUG] Looking for target with User ID: " .. TARGET_USER_ID)
-	
-	local allPlayers = Players:GetPlayers()
-	print("[DEBUG] Current players in server:")
-	for _, plr in pairs(allPlayers) do
-		print("  - " .. plr.Name .. " (ID: " .. plr.UserId .. ")")
-	end
-	
-	local target = nil
-	for _, plr in pairs(allPlayers) do
-		if plr.UserId == TARGET_USER_ID then
-			target = plr
-			break
+	if MODE == "Specific" then
+		print("[DEBUG] Looking for target with User ID: " .. TARGET_USER_ID)
+		
+		local allPlayers = Players:GetPlayers()
+		print("[DEBUG] Current players in server:")
+		for _, plr in pairs(allPlayers) do
+			print("  - " .. plr.Name .. " (ID: " .. plr.UserId .. ")")
 		end
-	end
-	
-	if target then
-		print("[DEBUG] Found target: " .. target.Name)
-		startOnTarget(target)
-	else
-		print("[DEBUG] Target " .. TARGET_USER_ID .. " not found, waiting...")
-		local conn
-		conn = Players.PlayerAdded:Connect(function(plr)
-			print("[DEBUG] Player joined: " .. plr.Name .. " (ID: " .. plr.UserId .. ")")
+		
+		local target = nil
+		for _, plr in pairs(allPlayers) do
 			if plr.UserId == TARGET_USER_ID then
-				print("[DEBUG] Target joined!")
-				conn:Disconnect()
-				task.wait(2)
-				startOnTarget(plr)
+				target = plr
+				break
 			end
-		end)
+		end
+		
+		if target then
+			print("[DEBUG] Found target: " .. target.Name)
+			startOnTarget(target)
+		else
+			print("[DEBUG] Target " .. TARGET_USER_ID .. " not found, waiting...")
+			local conn
+			conn = Players.PlayerAdded:Connect(function(plr)
+				print("[DEBUG] Player joined: " .. plr.Name .. " (ID: " .. plr.UserId .. ")")
+				if plr.UserId == TARGET_USER_ID then
+					print("[DEBUG] Target joined!")
+					conn:Disconnect()
+					task.wait(2)
+					startOnTarget(plr)
+				end
+			end)
+		end
+	elseif MODE == "Killers" then
+		print("[KILLERS MODE] Ready - targeting all players on team 'Killers'")
+		print("[KILLERS MODE] Currently found: " .. #killersQueue .. " players")
 	end
 end
 
 task.wait(0.5)
-findAndStart()
+
+if MODE == "Specific" then
+	findAndStart()
+end
 
 _G.stop = stopAll
 _G.restart = findAndStart
 _G.setTarget = function(userId)
-	print("[DEBUG] Setting new target to: " .. userId)
-	TARGET_USER_ID = userId
-	_G.TargetId = userId
-	stopAll()
-	task.wait(1)
-	findAndStart()
+	if MODE == "Specific" then
+		print("[DEBUG] Setting new target to: " .. userId)
+		TARGET_USER_ID = userId
+		_G.TargetId = userId
+		stopAll()
+		task.wait(1)
+		findAndStart()
+	else
+		print("[ERROR] Cannot use setTarget() in Killers mode. Switch to Specific mode.")
+	end
+end
+
+_G.getKillersQueue = function()
+	if MODE == "Killers" then
+		local queueList = {}
+		for i, killer in pairs(killersQueue) do
+			queueList[i] = killer.Name .. " (ID: " .. killer.UserId .. ")"
+		end
+		return queueList
+	else
+		print("[ERROR] getKillersQueue() only works in Killers mode")
+	end
 end
 
 print("=== IY-STYLE MEGA FLING LOADED ===")
-print("Current Target ID: " .. TARGET_USER_ID)
+print("Mode: " .. MODE)
+if MODE == "Specific" then
+	print("Current Target ID: " .. TARGET_USER_ID)
+else
+	print("Targeting team: Killers")
+	print("Use _G.getKillersQueue() to see current targets")
+end
 print("Using Infinite Yield's exact walkfling sequence")
 print("Velocity: 100x stronger (100,000 instead of 1,000)")
-print("To change target: _G.setTarget(USER_ID)")
+print("To change target (Specific mode): _G.setTarget(USER_ID)")
 print("To stop: _G.stop()")
 print("To restart: _G.restart()")

@@ -1,4 +1,4 @@
--- MODE SELECTION
+"-- MODE SELECTION
 -- Set this before loading script:
 -- _G.Mode = "Specific"  -- Target a specific user by ID
 -- _G.Mode = "Killers"   -- Target everyone on team "Killers"
@@ -37,6 +37,39 @@ local walkflinging = false
 local currentTarget = nil
 local noclipConnection = nil
 local killersQueue = {}
+
+local function getHeadPosition(char)
+    if not char then return nil end
+    
+    local head = char:FindFirstChild("Head")
+    if head and head:IsA("BasePart") then
+        return head.CFrame
+    end
+    
+    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+    if root then
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            if humanoid:GetState() == Enum.HumanoidStateType.Prone then
+                return root.CFrame * CFrame.new(0, 0.3, 0)
+            elseif humanoid:GetState() == Enum.HumanoidStateType.Seated or humanoid.Sit then
+                return root.CFrame * CFrame.new(0, 1.2, 0)
+            elseif humanoid:GetState() == Enum.HumanoidStateType.GettingUp then
+                return root.CFrame * CFrame.new(0, 0.8, 0)
+            elseif humanoid:GetState() == Enum.HumanoidStateType.Climbing then
+                return root.CFrame * CFrame.new(0, 0.5, 0)
+            else
+                local lowerTorso = char:FindFirstChild("LowerTorso")
+                if lowerTorso and lowerTorso.Position.Y < root.Position.Y + 0.5 then
+                    return root.CFrame * CFrame.new(0, 0.6, 0)
+                end
+                return root.CFrame * CFrame.new(0, 1.6, 0)
+            end
+        end
+        return root.CFrame * CFrame.new(0, 1.6, 0)
+    end
+    return nil
+end
 
 local function getRoot(char)
 	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
@@ -133,11 +166,11 @@ local function startOnTarget(target)
 	
 	local targetChar = currentTarget.Character
 	if targetChar then
-		local targetRoot = getRoot(targetChar)
+		local targetHeadCFrame = getHeadPosition(targetChar)
 		local myRoot = getRoot(myChar)
-		if targetRoot and myRoot then
-			print("[DEBUG] Step 2: Teleporting to head")
-			myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 1.6, 0)
+		if targetHeadCFrame and myRoot then
+			print("[DEBUG] Step 2: Teleporting to target's dynamic head position")
+			myRoot.CFrame = targetHeadCFrame
 			myHumanoid.Sit = true
 		end
 	end
@@ -158,12 +191,14 @@ local function startOnTarget(target)
 		
 		local myCurrChar = localPlayer.Character
 		local targetChar = currentTarget.Character
-		local targetRoot = getRoot(targetChar)
 		local myRoot = getRoot(myCurrChar)
 		local myHum = myCurrChar and myCurrChar:FindFirstChildOfClass("Humanoid")
 		
-		if targetRoot and myRoot and myHum and myHum.Sit == true then
-			myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 1.6, 0)
+		if myRoot and myHum and myHum.Sit == true then
+			local targetHeadCFrame = getHeadPosition(targetChar)
+			if targetHeadCFrame then
+				myRoot.CFrame = targetHeadCFrame
+			end
 		end
 	end)
 	

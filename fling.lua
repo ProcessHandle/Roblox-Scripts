@@ -1,4 +1,4 @@
-"-- MODE SELECTION
+-- MODE SELECTION
 -- Set this before loading script:
 -- _G.Mode = "Specific"  -- Target a specific user by ID
 -- _G.Mode = "Killers"   -- Target everyone on team "Killers"

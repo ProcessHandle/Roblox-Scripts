@@ -38,37 +38,77 @@ local currentTarget = nil
 local noclipConnection = nil
 local killersQueue = {}
 
-local function getHeadPosition(char)
+-- Store target position history for prediction
+local targetPosHistory = {}
+local targetVelHistory = {}
+
+local function getTorsoPosition(char)
     if not char then return nil end
     
-    local head = char:FindFirstChild("Head")
-    if head and head:IsA("BasePart") then
-        return head.CFrame
+    -- Prefer HumanoidRootPart, then Torso, then LowerTorso
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then
+        root = char:FindFirstChild("Torso")
+    end
+    if not root then
+        root = char:FindFirstChild("UpperTorso")
+    end
+    if not root then
+        root = char:FindFirstChild("LowerTorso")
     end
     
-    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
-    if root then
+    if root and root:IsA("BasePart") then
         local humanoid = char:FindFirstChildOfClass("Humanoid")
         if humanoid then
+            -- Adjust based on character state (sitting, prone, etc.)
             if humanoid:GetState() == Enum.HumanoidStateType.Prone then
-                return root.CFrame * CFrame.new(0, 0.3, 0)
+                return root.CFrame * CFrame.new(0, -0.5, 0)  -- Lower torso when prone
             elseif humanoid:GetState() == Enum.HumanoidStateType.Seated or humanoid.Sit then
-                return root.CFrame * CFrame.new(0, 1.2, 0)
+                return root.CFrame * CFrame.new(0, -0.3, 0)  -- Slightly lower when sitting
             elseif humanoid:GetState() == Enum.HumanoidStateType.GettingUp then
-                return root.CFrame * CFrame.new(0, 0.8, 0)
-            elseif humanoid:GetState() == Enum.HumanoidStateType.Climbing then
-                return root.CFrame * CFrame.new(0, 0.5, 0)
+                return root.CFrame * CFrame.new(0, 0.2, 0)  -- Mid-position when getting up
             else
-                local lowerTorso = char:FindFirstChild("LowerTorso")
-                if lowerTorso and lowerTorso.Position.Y < root.Position.Y + 0.5 then
-                    return root.CFrame * CFrame.new(0, 0.6, 0)
-                end
-                return root.CFrame * CFrame.new(0, 1.6, 0)
+                return root.CFrame * CFrame.new(0, 0.2, 0)  -- Normal standing torso position
             end
         end
-        return root.CFrame * CFrame.new(0, 1.6, 0)
+        return root.CFrame * CFrame.new(0, 0.2, 0)
     end
     return nil
+end
+
+-- Simple velocity prediction
+local function getPredictedPosition(targetChar)
+    local root = targetChar and (targetChar:FindFirstChild("HumanoidRootPart") or targetChar:FindFirstChild("Torso"))
+    if not root then return nil end
+    
+    local currentPos = root.Position
+    local currentVel = root.Velocity
+    
+    -- Store velocity history for smoothing
+    table.insert(targetVelHistory, 1, currentVel)
+    while #targetVelHistory > 3 do
+        table.remove(targetVelHistory)
+    end
+    
+    -- Calculate average velocity
+    local avgVel = Vector3.new(0, 0, 0)
+    for _, vel in pairs(targetVelHistory) do
+        avgVel = avgVel + vel
+    end
+    avgVel = avgVel / #targetVelHistory
+    
+    -- Predict 0.1 seconds ahead (adjustable)
+    local lookAhead = 0.1
+    local predictedPos = currentPos + (avgVel * lookAhead)
+    
+    -- Get torso CFrame at predicted position
+    local torsoCFrame = getTorsoPosition(targetChar)
+    if torsoCFrame then
+        local offset = predictedPos - currentPos
+        return torsoCFrame + offset
+    end
+    
+    return getTorsoPosition(targetChar)
 end
 
 local function getRoot(char)
@@ -126,6 +166,10 @@ local function stopAll()
 		noclipConnection = nil
 	end
 	
+	-- Clear prediction history
+	targetPosHistory = {}
+	targetVelHistory = {}
+	
 	local myChar = localPlayer.Character
 	if myChar then
 		local myHum = myChar:FindFirstChildOfClass("Humanoid")
@@ -166,11 +210,11 @@ local function startOnTarget(target)
 	
 	local targetChar = currentTarget.Character
 	if targetChar then
-		local targetHeadCFrame = getHeadPosition(targetChar)
+		local targetTorsoCFrame = getTorsoPosition(targetChar)
 		local myRoot = getRoot(myChar)
-		if targetHeadCFrame and myRoot then
-			print("[DEBUG] Step 2: Teleporting to target's dynamic head position")
-			myRoot.CFrame = targetHeadCFrame
+		if targetTorsoCFrame and myRoot then
+			print("[DEBUG] Step 2: Teleporting to target's torso position")
+			myRoot.CFrame = targetTorsoCFrame
 			myHumanoid.Sit = true
 		end
 	end
@@ -186,6 +230,7 @@ local function startOnTarget(target)
 	end
 	noclipConnection = RunService.Stepped:Connect(noclipLoop)
 	
+	-- Follow loop with prediction
 	headSit = RunService.Heartbeat:Connect(function()
 		if not currentTarget or not currentTarget.Character then return end
 		
@@ -195,9 +240,16 @@ local function startOnTarget(target)
 		local myHum = myCurrChar and myCurrChar:FindFirstChildOfClass("Humanoid")
 		
 		if myRoot and myHum and myHum.Sit == true then
-			local targetHeadCFrame = getHeadPosition(targetChar)
-			if targetHeadCFrame then
-				myRoot.CFrame = targetHeadCFrame
+			-- Get predicted position based on velocity
+			local predictedCFrame = getPredictedPosition(targetChar)
+			
+			if not predictedCFrame then
+				-- Fallback to current torso position
+				predictedCFrame = getTorsoPosition(targetChar)
+			end
+			
+			if predictedCFrame then
+				myRoot.CFrame = predictedCFrame
 			end
 		end
 	end)
@@ -444,6 +496,8 @@ end
 
 print("=== IY-STYLE MEGA FLING LOADED ===")
 print("Mode: " .. MODE)
+print("Targeting: Torso/Lower body (not head)")
+print("Prediction: Velocity-based (tracks movement)")
 if MODE == "Specific" then
 	print("Current Target ID: " .. TARGET_USER_ID)
 else

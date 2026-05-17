@@ -9,7 +9,6 @@ assert(dump, "Workspace.Dump not found after waiting")
 
 _G.TeleporterEnabled = _G.TeleporterEnabled ~= nil and _G.TeleporterEnabled or true
 _G.AutoReincarnate = _G.AutoReincarnate ~= nil and _G.AutoReincarnate or true
-_G.SkipLives = _G.SkipLives or 1
 
 local SCRIPT_URL = "https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/crate.lua"
 local queueteleport = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
@@ -17,16 +16,56 @@ if queueteleport then
     queueteleport('loadstring(game:HttpGet("' .. SCRIPT_URL .. '"))()')
 end
 
-local gui = player.PlayerGui:WaitForChild("Interface").Frames.Main.Progression
+local gui = player:WaitForChild("PlayerGui"):WaitForChild("Interface").Frames.Main.Progression
+local moneyLabel = player.PlayerGui:WaitForChild("Interface").Hub.Currency.Money.Label
+
 local reincarnateBtn = gui.Holder.List.Reincarnate.Holder.Reincarnate
 local loadBlueprintsBtn = gui.Holder.List.Blueprints.LoadAll
 local priceLabel = gui.Holder.List.Reincarnate.Holder.Price
-local moneyStat = player.leaderstats.Money
 
-assert(reincarnateBtn, "Reincarnate button not found")
-assert(loadBlueprintsBtn, "LoadBlueprints button not found")
-assert(priceLabel, "Price label not found")
-assert(moneyStat, "Money leaderstat not found")
+local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
+
+local function clickButton(button)
+    local pos = button.AbsolutePosition
+    local size = button.AbsoluteSize
+    local x = pos.X + size.X / 2
+    local y = pos.Y + size.Y / 2
+    
+    pcall(function()
+        VirtualUser:ClickButton1(Vector2.new(x, y))
+    end)
+    
+    pcall(function()
+        UserInputService:SetMousePosition(x, y)
+    end)
+    
+    pcall(function()
+        button:FireEvent("MouseButton1Down")
+        task.wait(0.05)
+        button:FireEvent("MouseButton1Up")
+    end)
+end
+
+local function parseRichTextNumber(text)
+    local number = text:match(">(.+?)<")
+    if not number then
+        number = text:gsub("[^%d.eE+-]", "")
+    end
+    return tonumber(number) or 0
+end
+
+local function getCurrentMoney()
+    return parseRichTextNumber(moneyLabel.Text)
+end
+
+local function getRequiredMoney()
+    return parseRichTextNumber(priceLabel.Text)
+end
+
+local function canReincarnate()
+    return getCurrentMoney() >= getRequiredMoney()
+end
 
 local function isValidTarget(obj)
     if not obj:IsA("BasePart") then return false end
@@ -42,30 +81,17 @@ local function teleportToTarget(target)
     end)
 end
 
-local function getRequiredMoney()
-    local priceText = priceLabel.Text:gsub("[^%d]", "")
-    return tonumber(priceText) or 0
-end
-
-local function getCurrentMoney()
-    return moneyStat.Value
-end
-
-local function canReincarnate()
-    return getCurrentMoney() >= getRequiredMoney()
-end
-
 local function reincarnate()
     if canReincarnate() then
-        reincarnateBtn:Click()
-        print("[Reincarnate] Skipping " .. _G.SkipLives .. " lives")
+        clickButton(reincarnateBtn)
+        print("[Reincarnate] Done!")
         return true
     end
     return false
 end
 
 local function placeBlueprints()
-    loadBlueprintsBtn:Click()
+    clickButton(loadBlueprintsBtn)
     print("[Blueprints] Placed!")
 end
 
@@ -99,7 +125,7 @@ task.spawn(function()
 end)
 
 print("═══════════════════════════════════════")
-print("  TELEPORTER + AUTO REINCARNATE (NICE ANTICHEAT RETARDS LOOOL)")
+print("  TELEPORTER + AUTO REINCARNATE")
 print("═══════════════════════════════════════")
 print("[Teleporter] " .. (_G.TeleporterEnabled and "ON" or "OFF"))
 print("[Reincarnate] " .. (_G.AutoReincarnate and "ON" or "OFF"))
@@ -107,5 +133,4 @@ print("────────────────────────�
 print("Commands:")
 print("  _G.TeleporterEnabled = false/true")
 print("  _G.AutoReincarnate = false/true")
-print("  _G.SkipLives = 1-4")
 print("═══════════════════════════════════════")

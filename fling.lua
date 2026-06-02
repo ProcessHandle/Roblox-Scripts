@@ -4,7 +4,6 @@
 -- _G.Mode = "Killers"   -- Target everyone on team "Killers"
 -- _G.TargetId = 10107875918  -- Only needed for Specific mode
 -- _G.TweenSpeed = 0.2  -- Optional: Tween speed (default 0.2)
--- _G.Offset = Vector3.new(3, 1, 0)  -- Optional: Position offset from target (default Vector3.new(3, 1, 0))
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -15,7 +14,6 @@ local localPlayer = Players.LocalPlayer
 local MODE = _G.Mode or "Specific"
 local TARGET_USER_ID = _G.TargetId
 local TWEEN_SPEED = _G.TweenSpeed or 0.2
-local POSITION_OFFSET = _G.Offset or Vector3.new(3, 1, 0)
 
 if MODE == "Specific" and not TARGET_USER_ID then
     task.wait(0.2)
@@ -27,7 +25,7 @@ if MODE == "Specific" and not TARGET_USER_ID then
 end
 
 print("[MODE] Running in " .. MODE .. " mode")
-print("[TWEEN] Speed: " .. TWEEN_SPEED .. ", Offset: " .. tostring(POSITION_OFFSET))
+print("[TWEEN] Speed: " .. TWEEN_SPEED)
 
 local blacklist = {
   1288458401,
@@ -38,7 +36,7 @@ local blacklist = {
   2861657607,
 }
 
-local teleportConnection = nil
+local tweenConnection = nil
 local walkflinging = false
 local currentTarget = nil
 local noclipConnection = nil
@@ -49,59 +47,16 @@ local function getRoot(char)
 	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
 end
 
-local function getTorsoPosition(char)
-    if not char then return nil end
-    
-    -- Priority: HumanoidRootPart -> UpperTorso -> Torso
-    local rootPart = char:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        return rootPart.CFrame
-    end
-    
-    local upperTorso = char:FindFirstChild("UpperTorso")
-    if upperTorso then
-        return upperTorso.CFrame
-    end
-    
-    local torso = char:FindFirstChild("Torso")
-    if torso then
-        return torso.CFrame
-    end
-    
-    return nil
-end
-
-local function getHeadPosition(char)
-    if not char then return nil end
-    
-    local head = char:FindFirstChild("Head")
-    if head and head:IsA("BasePart") then
-        return head.CFrame
-    end
-    
+local function breakVelocity()
+    local char = localPlayer.Character
+    if not char then return end
     local root = getRoot(char)
     if root then
-        local humanoid = char:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            if humanoid:GetState() == Enum.HumanoidStateType.Prone then
-                return root.CFrame * CFrame.new(0, 0.3, 0)
-            elseif humanoid:GetState() == Enum.HumanoidStateType.Seated or humanoid.Sit then
-                return root.CFrame * CFrame.new(0, 1.2, 0)
-            elseif humanoid:GetState() == Enum.HumanoidStateType.GettingUp then
-                return root.CFrame * CFrame.new(0, 0.8, 0)
-            elseif humanoid:GetState() == Enum.HumanoidStateType.Climbing then
-                return root.CFrame * CFrame.new(0, 0.5, 0)
-            else
-                local lowerTorso = char:FindFirstChild("LowerTorso")
-                if lowerTorso and lowerTorso.Position.Y < root.Position.Y + 0.5 then
-                    return root.CFrame * CFrame.new(0, 0.6, 0)
-                end
-                return root.CFrame * CFrame.new(0, 1.6, 0)
-            end
-        end
-        return root.CFrame * CFrame.new(0, 1.6, 0)
+        root.Velocity = Vector3.new(0, 0, 0)
+        root.RotVelocity = Vector3.new(0, 0, 0)
+        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
     end
-    return nil
 end
 
 local function isSpectator(plr)
@@ -144,33 +99,12 @@ local function ragdollPlayer(plr)
 	return false
 end
 
-local function teleportToTarget(targetPos)
-    local char = localPlayer.Character
-    if not char then return end
-    
-    local root = getRoot(char)
-    if not root then return end
-    
-    if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then
-        activeTween:Cancel()
-    end
-    
-    local tweenInfo = TweenInfo.new(TWEEN_SPEED, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(root, tweenInfo, {CFrame = targetPos})
-    
-    activeTween = tween
-    tween:Play()
-    
-    tween.Completed:Connect(function()
-        if activeTween == tween then
-            activeTween = nil
-        end
-    end)
-end
-
 local function stopAll()
 	walkflinging = false
-	teleportConnection = false
+	if tweenConnection then
+		tweenConnection:Disconnect()
+		tweenConnection = nil
+	end
 	if activeTween then
 		activeTween:Cancel()
 		activeTween = nil
@@ -182,15 +116,12 @@ local function stopAll()
 	
 	local myChar = localPlayer.Character
 	if myChar then
-		local myHum = myChar:FindFirstChildOfClass("Humanoid")
-		if myHum then
-			myHum.Sit = false
-		end
 		local myRoot = getRoot(myChar)
 		if myRoot then
 			myRoot.Velocity = Vector3.new(0, 0, 0)
 		end
 	end
+	breakVelocity()
 	currentTarget = nil
 end
 
@@ -216,19 +147,23 @@ local function startOnTarget(target)
 	end
 	
 	local myHumanoid = myChar:FindFirstChildOfClass("Humanoid")
-	if not myHumanoid then return end
 	
 	local targetChar = currentTarget.Character
 	if targetChar then
-		-- Use torso position instead of head
-		local targetTorsoCFrame = getTorsoPosition(targetChar)
+		local targetRoot = getRoot(targetChar)
 		local myRoot = getRoot(myChar)
-		if targetTorsoCFrame and myRoot then
-			print("[DEBUG] Step 2: Teleporting to target's torso position")
-			local targetPos = targetTorsoCFrame + POSITION_OFFSET
-			myRoot.CFrame = targetPos
-			myHumanoid.Sit = true
+		if targetRoot and myRoot then
+			print("[DEBUG] Step 2: Initial teleport to target torso")
+			-- Exact method from the command: GetPivot() with offset (using 0 offset to stay IN their torso)
+			myRoot.CFrame = targetRoot:GetPivot()
 		end
+	end
+	
+	-- Disable sitting exactly like the command
+	if myHumanoid then
+		local oldState = myHumanoid:GetStateEnabled(Enum.HumanoidStateType.Seated)
+		myHumanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+		-- Store oldState to restore later if needed, but we won't use sit
 	end
 	
 	local function noclipLoop()
@@ -242,23 +177,37 @@ local function startOnTarget(target)
 	end
 	noclipConnection = RunService.Stepped:Connect(noclipLoop)
 	
-	-- TWEEN-BASED TELEPORT LOOP (targets torso instead of head)
-	teleportConnection = RunService.Heartbeat:Connect(function()
-		if not currentTarget or not currentTarget.Character or not teleportConnection then return end
+	-- EXACT TWEEN METHOD FROM THE COMMAND - constantly teleport to target's torso
+	tweenConnection = RunService.Heartbeat:Connect(function()
+		if not currentTarget or not currentTarget.Character or not tweenConnection then return end
 		
 		local myCurrChar = localPlayer.Character
 		local targetChar = currentTarget.Character
 		local myRoot = getRoot(myCurrChar)
-		local myHum = myCurrChar and myCurrChar:FindFirstChildOfClass("Humanoid")
 		
-		if myRoot and myHum and myHum.Sit == true then
-			-- Use torso position instead of head
-			local targetTorsoCFrame = getTorsoPosition(targetChar)
-			if targetTorsoCFrame then
-				local targetPos = targetTorsoCFrame + POSITION_OFFSET
-				if not activeTween or activeTween.PlaybackState ~= Enum.PlaybackState.Playing then
-					teleportToTarget(targetPos)
+		if myRoot and targetChar then
+			local targetRoot = getRoot(targetChar)
+			if targetRoot then
+				-- Cancel any active tween
+				if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then
+					activeTween:Cancel()
 				end
+				
+				-- EXACT SAME TWEEN CREATION as the command
+				-- Using GetPivot() and staying at exact torso position (no offset)
+				local tweenInfo = TweenInfo.new(TWEEN_SPEED, Enum.EasingStyle.Linear)
+				local tween = TweenService:Create(myRoot, tweenInfo, {
+					CFrame = targetRoot:GetPivot()
+				})
+				
+				activeTween = tween
+				tween:Play()
+				
+				tween.Completed:Connect(function()
+					if activeTween == tween then
+						activeTween = nil
+					end
+				end)
 			end
 		end
 	end)
@@ -292,6 +241,11 @@ local function startOnTarget(target)
 			if character and character.Parent and root and root.Parent and walkflinging then
 				root.Velocity = vel + Vector3.new(0, movel * 100, 0)
 				movel = movel * -1
+			end
+			
+			-- Break velocity like the command does
+			if walkflinging then
+				breakVelocity()
 			end
 		until walkflinging == false
 	end)
@@ -508,12 +462,7 @@ _G.setTweenSpeed = function(speed)
 	print("[TWEEN] Speed updated to: " .. speed)
 end
 
-_G.setOffset = function(offset)
-	POSITION_OFFSET = offset
-	print("[TWEEN] Offset updated to: " .. tostring(offset))
-end
-
-print("=== IY-STYLE MEGA FLING + TWEEN TELEPORT (TORSO TRACKING) LOADED ===")
+print("=== AC BYPASS TWEEN FLING LOADED ===")
 print("Mode: " .. MODE)
 if MODE == "Specific" then
 	print("Current Target ID: " .. TARGET_USER_ID)
@@ -521,12 +470,12 @@ else
 	print("Targeting team: Killers")
 	print("Use _G.getKillersQueue() to see current targets")
 end
-print("Walkfling: Active (100x stronger velocity)")
-print("Teleport method: TweenService tracking TORSO/ROOT position")
+print("Teleport method: EXACT command method (GetPivot + TweenService)")
+print("Sit method: DISABLED (anticheat bypass)")
 print("Tween speed: " .. TWEEN_SPEED .. " seconds")
-print("Position offset from target: " .. tostring(POSITION_OFFSET))
+print("Position: INSIDE target torso (no offset)")
+print("Breakvelocity: Active on every step")
 print("To change target (Specific mode): _G.setTarget(USER_ID)")
 print("To adjust tween speed: _G.setTweenSpeed(0.3)")
-print("To adjust offset: _G.setOffset(Vector3.new(5, 2, 0))")
 print("To stop: _G.stop()")
 print("To restart: _G.restart()")

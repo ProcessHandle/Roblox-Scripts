@@ -46,7 +46,29 @@ local killersQueue = {}
 local activeTween = nil
 
 local function getRoot(char)
-	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
+end
+
+local function getTorsoPosition(char)
+    if not char then return nil end
+    
+    -- Priority: HumanoidRootPart -> UpperTorso -> Torso
+    local rootPart = char:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        return rootPart.CFrame
+    end
+    
+    local upperTorso = char:FindFirstChild("UpperTorso")
+    if upperTorso then
+        return upperTorso.CFrame
+    end
+    
+    local torso = char:FindFirstChild("Torso")
+    if torso then
+        return torso.CFrame
+    end
+    
+    return nil
 end
 
 local function getHeadPosition(char)
@@ -198,11 +220,12 @@ local function startOnTarget(target)
 	
 	local targetChar = currentTarget.Character
 	if targetChar then
-		local targetHeadCFrame = getHeadPosition(targetChar)
+		-- Use torso position instead of head
+		local targetTorsoCFrame = getTorsoPosition(targetChar)
 		local myRoot = getRoot(myChar)
-		if targetHeadCFrame and myRoot then
-			print("[DEBUG] Step 2: Teleporting to target's dynamic head position")
-			local targetPos = targetHeadCFrame + POSITION_OFFSET
+		if targetTorsoCFrame and myRoot then
+			print("[DEBUG] Step 2: Teleporting to target's torso position")
+			local targetPos = targetTorsoCFrame + POSITION_OFFSET
 			myRoot.CFrame = targetPos
 			myHumanoid.Sit = true
 		end
@@ -219,7 +242,7 @@ local function startOnTarget(target)
 	end
 	noclipConnection = RunService.Stepped:Connect(noclipLoop)
 	
-	-- TWEEN-BASED TELEPORT LOOP (replaces headSit)
+	-- TWEEN-BASED TELEPORT LOOP (targets torso instead of head)
 	teleportConnection = RunService.Heartbeat:Connect(function()
 		if not currentTarget or not currentTarget.Character or not teleportConnection then return end
 		
@@ -229,9 +252,10 @@ local function startOnTarget(target)
 		local myHum = myCurrChar and myCurrChar:FindFirstChildOfClass("Humanoid")
 		
 		if myRoot and myHum and myHum.Sit == true then
-			local targetHeadCFrame = getHeadPosition(targetChar)
-			if targetHeadCFrame then
-				local targetPos = targetHeadCFrame + POSITION_OFFSET
+			-- Use torso position instead of head
+			local targetTorsoCFrame = getTorsoPosition(targetChar)
+			if targetTorsoCFrame then
+				local targetPos = targetTorsoCFrame + POSITION_OFFSET
 				if not activeTween or activeTween.PlaybackState ~= Enum.PlaybackState.Playing then
 					teleportToTarget(targetPos)
 				end
@@ -489,7 +513,7 @@ _G.setOffset = function(offset)
 	print("[TWEEN] Offset updated to: " .. tostring(offset))
 end
 
-print("=== IY-STYLE MEGA FLING + TWEEN TELEPORT LOADED ===")
+print("=== IY-STYLE MEGA FLING + TWEEN TELEPORT (TORSO TRACKING) LOADED ===")
 print("Mode: " .. MODE)
 if MODE == "Specific" then
 	print("Current Target ID: " .. TARGET_USER_ID)
@@ -498,7 +522,7 @@ else
 	print("Use _G.getKillersQueue() to see current targets")
 end
 print("Walkfling: Active (100x stronger velocity)")
-print("Teleport method: TweenService (replaces headSit)")
+print("Teleport method: TweenService tracking TORSO/ROOT position")
 print("Tween speed: " .. TWEEN_SPEED .. " seconds")
 print("Position offset from target: " .. tostring(POSITION_OFFSET))
 print("To change target (Specific mode): _G.setTarget(USER_ID)")

@@ -47,6 +47,7 @@ local function saveVisited(visited)
 end
 
 local visited = loadVisited()
+print("[K] Loaded visited count:", (function() local n=0 for _ in pairs(visited) do n=n+1 end return n end)())
 
 local function getRoot()
     local lp = Players.LocalPlayer
@@ -60,33 +61,56 @@ end
 
 local function fireWithRetry(prompt, part)
     for attempt = 1, FIRE_RETRIES do
+        print("[K] Fire attempt", attempt, "on", prompt:GetFullName())
+
         local root = getRoot()
-        if not root then return false end
+        if not root then
+            print("[K] No root, aborting")
+            return false
+        end
 
         root.CFrame = part.CFrame
         task.wait(TP_DELAY)
 
-        pcall(function()
+        local ok, err = pcall(function()
             fireproximityprompt(prompt)
         end)
 
+        print("[K] fireproximityprompt ok:", ok, err or "")
+
         task.wait(FIRE_RETRY_DELAY)
 
-        if not prompt.Parent or not prompt.Enabled then
+        if not prompt.Parent then
+            print("[K] Prompt destroyed, success")
             return true
         end
+
+        if not prompt.Enabled then
+            print("[K] Prompt disabled, success")
+            return true
+        end
+
+        print("[K] Prompt still active, retrying")
     end
     return false
 end
 
 local function serverHop()
-    if hopping then return end
-    if os.clock() - lastHop < HOP_COOLDOWN then return end
+    if hopping then
+        print("[K] Hop blocked: already hopping")
+        return
+    end
+    if os.clock() - lastHop < HOP_COOLDOWN then
+        print("[K] Hop blocked: cooldown", HOP_COOLDOWN - (os.clock() - lastHop))
+        return
+    end
 
     hopping = true
     lastHop = os.clock()
     visited[game.JobId] = true
     saveVisited(visited)
+
+    print("[K] Current JobId:", game.JobId)
 
     local ok, body = pcall(function()
         return HttpService:JSONDecode(game:HttpGet(
@@ -96,9 +120,12 @@ local function serverHop()
     end)
 
     if not ok or not body or not body.data then
+        print("[K] Server list fetch failed:", ok, body)
         hopping = false
         return
     end
+
+    print("[K] Fetched", #body.data, "servers")
 
     local servers = {}
     for _, v in next, body.data do
@@ -112,24 +139,36 @@ local function serverHop()
         end
     end
 
+    print("[K] Fresh candidates:", #servers)
+
     if #servers == 0 then
+        print("[K] No fresh servers, resetting visited")
         visited = { [game.JobId] = true }
         saveVisited(visited)
         hopping = false
         return
     end
 
+    local chosen = servers[math.random(1, #servers)]
+    print("[K] Chosen:", chosen)
+
     if type(syn) == "table" and syn.queue_on_teleport then
         pcall(syn.queue_on_teleport, 'loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"))()')
+        print("[K] Queued via syn")
     elseif type(queue_on_teleport) == "function" then
         pcall(queue_on_teleport, 'loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"))()')
+        print("[K] Queued via queue_on_teleport")
+    else
+        print("[K] WARNING: no queue_on_teleport support")
     end
 
     task.wait(HOP_DELAY)
 
-    local success = pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], Players.LocalPlayer)
+    local success, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, chosen, Players.LocalPlayer)
     end)
+
+    print("[K] Teleport result:", success, err or "")
 
     if not success then
         hopping = false
@@ -137,18 +176,24 @@ local function serverHop()
 end
 
 local function scan()
+    local count = 0
     for _, child in ipairs(workspace:GetChildren()) do
         if TARGETS[child.Name] then
+            count = count + 1
             for _, desc in ipairs(child:GetDescendants()) do
                 if desc:IsA("ProximityPrompt") and not fired[desc] and not queued[desc] then
                     local part = desc.Parent
                     if part and part:IsA("BasePart") then
                         queued[desc] = true
                         table.insert(queue, desc)
+                        print("[K] Queued:", desc:GetFullName())
                     end
                 end
             end
         end
+    end
+    if count > 0 then
+        print("[K] Scan found", count, "targets, queue size:", #queue)
     end
 end
 
@@ -164,12 +209,13 @@ local function processQueue()
             local part = prompt.Parent
 
             if part and part:IsA("BasePart") then
+                print("[K] Processing:", prompt:GetFullName())
                 local success = fireWithRetry(prompt, part)
                 if success then
                     fired[prompt] = true
-                    print("[K] Fired:", prompt:GetFullName())
+                    print("[K] Marked fired:", prompt:GetFullName())
                 else
-                    print("[K] Failed:", prompt:GetFullName())
+                    print("[K] Gave up on:", prompt:GetFullName())
                 end
             end
         end
@@ -181,7 +227,10 @@ local function processQueue()
 end
 
 local function checkEmpty()
-    if hopping then return end
+    if hopping then
+        print("[K] checkEmpty: hopping, skip")
+        return
+    end
     task.wait(2)
 
     local foundAny = false
@@ -192,7 +241,10 @@ local function checkEmpty()
         end
     end
 
+    print("[K] checkEmpty: foundAny:", foundAny, "queue:", #queue, "busy:", busy)
+
     if not foundAny and #queue == 0 and not busy then
+        print("[K] Empty, hopping")
         serverHop()
     end
 end

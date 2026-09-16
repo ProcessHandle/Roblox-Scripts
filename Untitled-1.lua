@@ -12,12 +12,16 @@ local TP_DELAY = 0.5
 local FIRE_COOLDOWN = 1.5
 local RESCAN_DELAY = 2
 local HOP_DELAY = 3
+local HOP_COOLDOWN = 10
+local SCRIPT_URL = ""
 
 local fired = {}
 local queued = {}
 local queue = {}
 local busy = false
 local hopping = false
+local lastHop = 0
+local previousJobId = nil
 
 local function getRoot()
     local char = LP.Character or LP.CharacterAdded:Wait()
@@ -34,14 +38,29 @@ end
 
 local function serverHop()
     if hopping then return end
-    hopping = true
+    if os.clock() - lastHop < HOP_COOLDOWN then return end
 
-    queueOnTeleport([[
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"))()
-    ]])
+    local currentJob = game.JobId
+    if currentJob == previousJobId then return end
+
+    hopping = true
+    previousJobId = currentJob
+    lastHop = os.clock()
+
+    queueOnTeleport(string.format([[
+        loadstring(game:HttpGet("%s"))()
+    ]], SCRIPT_URL))
 
     task.wait(HOP_DELAY)
-    TeleportService:Teleport(game.PlaceId)
+
+    local success, err = pcall(function()
+        TeleportService:Teleport(game.PlaceId, LP)
+    end)
+
+    if not success then
+        warn("[K] Hop failed:", err)
+        hopping = false
+    end
 end
 
 local function scan()

@@ -37,7 +37,7 @@ local function serverHop()
     hopping = true
 
     queueOnTeleport([[
-        loadstring(game:HttpGet(""))()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"))()
     ]])
 
     task.wait(HOP_DELAY)

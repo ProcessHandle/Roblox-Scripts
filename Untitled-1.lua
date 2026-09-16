@@ -2,13 +2,18 @@ local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 
-local TARGETS = { GloEgg = true, HarvestEgg = true, FarmEgg = true }
+local TARGETS = {
+    GloEgg = true, HarvestEgg = true, FarmEgg = true,
+    BigGloEgg = true, BigHarvestEgg = true, BigFarmEgg = true
+}
 
 local TP_DELAY = 0.5
 local FIRE_COOLDOWN = 1.5
 local RESCAN_DELAY = 2
 local HOP_DELAY = 3
 local HOP_COOLDOWN = 10
+local FIRE_RETRIES = 3
+local FIRE_RETRY_DELAY = 0.4
 
 local fired = {}
 local queued = {}
@@ -43,21 +48,35 @@ end
 
 local visited = loadVisited()
 
-local function getLP()
-    return Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer")
-        and Players.LocalPlayer
-        or Players:WaitForChild("LocalPlayer", 10)
-end
-
 local function getRoot()
     local lp = Players.LocalPlayer
     if not lp then
-        lp = Players:GetPropertyChangedSignal("LocalPlayer"):Wait() and Players.LocalPlayer
+        repeat task.wait(0.1) until Players.LocalPlayer
+        lp = Players.LocalPlayer
     end
-    if not lp then return nil end
-
     local char = lp.Character or lp.CharacterAdded:Wait()
-    return char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 5)
+    return char:WaitForChild("HumanoidRootPart", 5)
+end
+
+local function fireWithRetry(prompt, part)
+    for attempt = 1, FIRE_RETRIES do
+        local root = getRoot()
+        if not root then return false end
+
+        root.CFrame = part.CFrame
+        task.wait(TP_DELAY)
+
+        pcall(function()
+            fireproximityprompt(prompt)
+        end)
+
+        task.wait(FIRE_RETRY_DELAY)
+
+        if not prompt.Parent or not prompt.Enabled then
+            return true
+        end
+    end
+    return false
 end
 
 local function serverHop()
@@ -143,17 +162,15 @@ local function processQueue()
 
         if not fired[prompt] and prompt.Parent then
             local part = prompt.Parent
-            local root = getRoot()
 
-            if part and part:IsA("BasePart") and root then
-                root.CFrame = part.CFrame
-                task.wait(TP_DELAY)
-
-                pcall(function()
-                    fireproximityprompt(prompt)
-                end)
-
-                fired[prompt] = true
+            if part and part:IsA("BasePart") then
+                local success = fireWithRetry(prompt, part)
+                if success then
+                    fired[prompt] = true
+                    print("[K] Fired:", prompt:GetFullName())
+                else
+                    print("[K] Failed:", prompt:GetFullName())
+                end
             end
         end
 

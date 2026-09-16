@@ -13,7 +13,7 @@ local FIRE_COOLDOWN = 1.5
 local RESCAN_DELAY = 2
 local HOP_DELAY = 3
 local HOP_COOLDOWN = 10
-local SCRIPT_URL = ""
+local SCRIPT_URL = "https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"
 
 local fired = {}
 local queued = {}

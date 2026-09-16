@@ -18,7 +18,31 @@ local busy = false
 local hopping = false
 local lastHop = 0
 
-local visited = { [game.JobId] = true }
+local function loadVisited()
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(readfile("visited_servers.json"))
+    end)
+    local visited = {}
+    if ok and type(data) == "table" then
+        for _, id in ipairs(data) do
+            visited[id] = true
+        end
+    end
+    visited[game.JobId] = true
+    return visited
+end
+
+local function saveVisited(visited)
+    local list = {}
+    for id in pairs(visited) do
+        table.insert(list, id)
+    end
+    pcall(function()
+        writefile("visited_servers.json", HttpService:JSONEncode(list))
+    end)
+end
+
+local visited = loadVisited()
 
 local function getRoot()
     local char = LP.Character or LP.CharacterAdded:Wait()
@@ -32,6 +56,7 @@ local function serverHop()
     hopping = true
     lastHop = os.clock()
     visited[game.JobId] = true
+    saveVisited(visited)
 
     local ok, body = pcall(function()
         return HttpService:JSONDecode(game:HttpGet(
@@ -59,6 +84,7 @@ local function serverHop()
 
     if #servers == 0 then
         visited = { [game.JobId] = true }
+        saveVisited(visited)
         hopping = false
         return
     end

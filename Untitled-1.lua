@@ -1,7 +1,6 @@
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
-local LP = Players.LocalPlayer
 
 local TARGETS = { GloEgg = true, HarvestEgg = true, FarmEgg = true }
 
@@ -44,9 +43,21 @@ end
 
 local visited = loadVisited()
 
+local function getLP()
+    return Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer")
+        and Players.LocalPlayer
+        or Players:WaitForChild("LocalPlayer", 10)
+end
+
 local function getRoot()
-    local char = LP.Character or LP.CharacterAdded:Wait()
-    return char:FindFirstChild("HumanoidRootPart")
+    local lp = Players.LocalPlayer
+    if not lp then
+        lp = Players:GetPropertyChangedSignal("LocalPlayer"):Wait() and Players.LocalPlayer
+    end
+    if not lp then return nil end
+
+    local char = lp.Character or lp.CharacterAdded:Wait()
+    return char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 5)
 end
 
 local function serverHop()
@@ -98,7 +109,7 @@ local function serverHop()
     task.wait(HOP_DELAY)
 
     local success = pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], LP)
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], Players.LocalPlayer)
     end)
 
     if not success then

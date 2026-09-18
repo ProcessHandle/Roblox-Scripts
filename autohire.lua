@@ -3,12 +3,34 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local FisherKiosk = ReplicatedStorage.Networking.Requests:WaitForChild("FisherKiosk")
+local LocalPlayer = Players.LocalPlayer
+local FisherKiosk = ReplicatedStorage:WaitForChild("Networking"):WaitForChild("Requests"):WaitForChild("FisherKiosk")
 
 local HOP_DELAY = 3
 local HOP_COOLDOWN = 15
 local MIN_UPGRADE_MARGIN = 1.05
 local MIN_OFFER_SCORE_TO_STAY = 120
+local REQUEUE_URL = "https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/autohire.lua"
+
+local function waitForLoad()
+    LocalPlayer:WaitForChild("Character", 30)
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    char:WaitForChild("HumanoidRootPart", 30)
+    char:WaitForChild("Humanoid", 30)
+
+    if not workspace:FindFirstChild("PlayerIslands") then
+        workspace:WaitForChild("PlayerIslands", 30)
+    end
+
+    local island
+    local deadline = os.clock() + 30
+    repeat
+        island = workspace.PlayerIslands:FindFirstChild(LocalPlayer.Name .. "_Island")
+        if not island then task.wait(0.25) end
+    until island or os.clock() > deadline
+
+    task.wait(2)
+end
 
 local function loadVisited()
     local ok, data = pcall(function()
@@ -33,6 +55,10 @@ local function saveVisited(visited)
         writefile("visited_fisher.json", HttpService:JSONEncode(list))
     end)
 end
+
+waitForLoad()
+
+print("[FH] Loaded, JobId:", game.JobId)
 
 local visited = loadVisited()
 local hopping = false
@@ -161,7 +187,7 @@ local function serverHop()
     local chosen = servers[math.random(1, #servers)]
     print("[FH] Hopping to", chosen)
 
-    local requeue = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/autohire.lua"))()'
+    local requeue = 'loadstring(game:HttpGet("' .. REQUEUE_URL .. '"))()'
     if type(syn) == "table" and syn.queue_on_teleport then
         pcall(syn.queue_on_teleport, requeue)
     elseif type(queue_on_teleport) == "function" then
@@ -170,7 +196,7 @@ local function serverHop()
 
     task.wait(HOP_DELAY)
     local success = pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, chosen, Players.LocalPlayer)
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, chosen, LocalPlayer)
     end)
 
     if not success then
@@ -178,15 +204,13 @@ local function serverHop()
     end
 end
 
-print("[FH] Started, visited:", (function()
-    local n = 0
-    for i, v in pairs(visited) do
-        n = n + 1
-    end
-    return n
-end)())
-
+local lastState = nil
 while true do
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        print("[FH] Lost character, waiting for respawn")
+        waitForLoad()
+    end
+
     local state = invoke("state")
     if not state then
         task.wait(2)

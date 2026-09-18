@@ -186,7 +186,6 @@ print("[FH] Started, visited:", (function()
     return n
 end)())
 
-local lastRemaining = nil
 while true do
     local state = invoke("state")
     if not state then
@@ -194,16 +193,11 @@ while true do
         continue
     end
 
-    local remaining = state.refreshIn or 0
-
-    if lastRemaining == nil or remaining > lastRemaining then
-        local shouldStay = tick(state)
-        if not shouldStay then
-            print("[FH] Conditions not met, hopping")
-            serverHop()
-        end
+    local shouldStay = tick(state)
+    if not shouldStay then
+        print("[FH] Conditions not met, hopping")
+        serverHop()
     end
 
-    lastRemaining = remaining
-    task.wait(math.max(1, remaining))
+    task.wait(3)
 end

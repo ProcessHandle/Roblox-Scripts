@@ -161,7 +161,7 @@ local function serverHop()
     local chosen = servers[math.random(1, #servers)]
     print("[FH] Hopping to", chosen)
 
-    local requeue = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"))()'
+    local requeue = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/autohire.lua"))()'
     if type(syn) == "table" and syn.queue_on_teleport then
         pcall(syn.queue_on_teleport, requeue)
     elseif type(queue_on_teleport) == "function" then

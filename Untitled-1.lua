@@ -12,15 +12,21 @@ local FIRE_COOLDOWN = 1.5
 local RESCAN_DELAY = 2
 local HOP_DELAY = 3
 local HOP_COOLDOWN = 10
+local HOP_TIMEOUT = 25
 local FIRE_RETRIES = 3
 local FIRE_RETRY_DELAY = 0.4
 
 local fired = {}
 local queued = {}
 local queue = {}
-local busy = false
-local hopping = false
-local lastHop = 0
+
+local STATE = {
+    busy = false,
+    hopping = false,
+    lastHopAttempt = 0,
+    hopStartedAt = 0,
+    lastEmptyLog = 0,
+}
 
 local function loadVisited()
     local ok, data = pcall(function()
@@ -47,13 +53,19 @@ local function saveVisited(visited)
 end
 
 local visited = loadVisited()
-print("[K] Loaded visited count:", (function() local n=0 for _ in pairs(visited) do n=n+1 end return n end)())
+do
+    local n = 0
+    for _ in pairs(visited) do n = n + 1 end
+    print("[K] Loaded visited count:", n)
+end
 
 local function getRoot()
     local lp = Players.LocalPlayer
     if not lp then
-        repeat task.wait(0.1) until Players.LocalPlayer
+        local t = os.clock()
+        repeat task.wait(0.1) until Players.LocalPlayer or os.clock() - t > 5
         lp = Players.LocalPlayer
+        if not lp then return nil end
     end
     local char = lp.Character or lp.CharacterAdded:Wait()
     return char:WaitForChild("HumanoidRootPart", 5)
@@ -61,7 +73,9 @@ end
 
 local function fireWithRetry(prompt, part)
     for attempt = 1, FIRE_RETRIES do
-        print("[K] Fire attempt", attempt, "on", prompt:GetFullName())
+        if not prompt or not prompt.Parent then
+            return true
+        end
 
         local root = getRoot()
         if not root then
@@ -76,41 +90,35 @@ local function fireWithRetry(prompt, part)
             fireproximityprompt(prompt)
         end)
 
-        print("[K] fireproximityprompt ok:", ok, err or "")
+        if not ok then
+            print("[K] fireproximityprompt error:", err)
+        end
 
         task.wait(FIRE_RETRY_DELAY)
 
         if not prompt.Parent then
-            print("[K] Prompt destroyed, success")
             return true
         end
-
         if not prompt.Enabled then
-            print("[K] Prompt disabled, success")
             return true
         end
-
-        print("[K] Prompt still active, retrying")
     end
     return false
 end
 
 local function serverHop()
-    if hopping then
-        print("[K] Hop blocked: already hopping")
-        return
-    end
-    if os.clock() - lastHop < HOP_COOLDOWN then
-        print("[K] Hop blocked: cooldown", HOP_COOLDOWN - (os.clock() - lastHop))
-        return
-    end
+    if STATE.hopping then return end
+    if os.clock() - STATE.lastHopAttempt < HOP_COOLDOWN then return end
+    if STATE.busy or #queue > 0 then return end
 
-    hopping = true
-    lastHop = os.clock()
+    STATE.hopping = true
+    STATE.lastHopAttempt = os.clock()
+    STATE.hopStartedAt = os.clock()
+
     visited[game.JobId] = true
     saveVisited(visited)
 
-    print("[K] Current JobId:", game.JobId)
+    print("[K] Hopping from JobId:", game.JobId)
 
     local ok, body = pcall(function()
         return HttpService:JSONDecode(game:HttpGet(
@@ -120,12 +128,10 @@ local function serverHop()
     end)
 
     if not ok or not body or not body.data then
-        print("[K] Server list fetch failed:", ok, body)
-        hopping = false
+        print("[K] Server list fetch failed")
+        STATE.hopping = false
         return
     end
-
-    print("[K] Fetched", #body.data, "servers")
 
     local servers = {}
     for _, v in next, body.data do
@@ -139,27 +145,25 @@ local function serverHop()
         end
     end
 
-    print("[K] Fresh candidates:", #servers)
-
     if #servers == 0 then
-        print("[K] No fresh servers, resetting visited")
+        print("[K] No fresh servers, resetting visited list")
         visited = { [game.JobId] = true }
         saveVisited(visited)
-        hopping = false
+        STATE.hopping = false
         return
     end
 
     local chosen = servers[math.random(1, #servers)]
-    print("[K] Chosen:", chosen)
+    print("[K] Chosen server:", chosen, "(", #servers, "candidates )")
+
+    local requeue = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"))()'
 
     if type(syn) == "table" and syn.queue_on_teleport then
-        pcall(syn.queue_on_teleport, 'loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"))()')
-        print("[K] Queued via syn")
+        pcall(syn.queue_on_teleport, requeue)
     elseif type(queue_on_teleport) == "function" then
-        pcall(queue_on_teleport, 'loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"))()')
-        print("[K] Queued via queue_on_teleport")
+        pcall(queue_on_teleport, requeue)
     else
-        print("[K] WARNING: no queue_on_teleport support")
+        print("[K] WARNING: no queue_on_teleport support, script will not reload")
     end
 
     task.wait(HOP_DELAY)
@@ -168,11 +172,11 @@ local function serverHop()
         TeleportService:TeleportToPlaceInstance(game.PlaceId, chosen, Players.LocalPlayer)
     end)
 
-    print("[K] Teleport result:", success, err or "")
-
     if not success then
-        hopping = false
+        print("[K] Teleport failed:", err)
+        STATE.hopping = false
     end
+    -- on success Roblox unloads us; STATE.hopping stays true which is fine
 end
 
 local function scan()
@@ -186,36 +190,35 @@ local function scan()
                     if part and part:IsA("BasePart") then
                         queued[desc] = true
                         table.insert(queue, desc)
-                        print("[K] Queued:", desc:GetFullName())
                     end
                 end
             end
         end
     end
-    if count > 0 then
-        print("[K] Scan found", count, "targets, queue size:", #queue)
+    if count > 0 and #queue > 0 then
+        print("[K] Scan found", count, "targets, queue:", #queue)
     end
 end
 
 local function processQueue()
-    if busy then return end
-    busy = true
+    if STATE.busy then return end
+    STATE.busy = true
 
     while #queue > 0 do
+        if STATE.hopping then break end
+
         local prompt = table.remove(queue, 1)
         queued[prompt] = nil
 
-        if not fired[prompt] and prompt.Parent then
+        if prompt and prompt.Parent and not fired[prompt] then
             local part = prompt.Parent
-
-            if part and part:IsA("BasePart") then
-                print("[K] Processing:", prompt:GetFullName())
+            if part:IsA("BasePart") then
                 local success = fireWithRetry(prompt, part)
                 if success then
                     fired[prompt] = true
-                    print("[K] Marked fired:", prompt:GetFullName())
+                    print("[K] Fired:", prompt:GetFullName())
                 else
-                    print("[K] Gave up on:", prompt:GetFullName())
+                    print("[K] Gave up:", prompt:GetFullName())
                 end
             end
         end
@@ -223,45 +226,48 @@ local function processQueue()
         task.wait(FIRE_COOLDOWN)
     end
 
-    busy = false
+    STATE.busy = false
+end
+
+local function hasTargets()
+    for _, child in ipairs(workspace:GetChildren()) do
+        if TARGETS[child.Name] then
+            return true
+        end
+    end
+    return false
 end
 
 local function checkEmpty()
-    if hopping then
-        print("[K] checkEmpty: hopping, skip")
+    -- recover from a hop that never actually unloaded us
+    if STATE.hopping and os.clock() - STATE.hopStartedAt > HOP_TIMEOUT then
+        warn("[K] Hop timeout, resetting state")
+        STATE.hopping = false
+    end
+
+    -- hard gate: don't hop while working or already hopping
+    if STATE.hopping or STATE.busy or #queue > 0 then
         return
     end
-    task.wait(2)
 
-    local foundAny = false
-    for _, child in ipairs(workspace:GetChildren()) do
-        if TARGETS[child.Name] then
-            foundAny = true
-            break
+    if not hasTargets() then
+        -- rate-limit the log so we don't spam
+        if os.clock() - STATE.lastEmptyLog > 5 then
+            print("[K] No targets, attempting hop")
+            STATE.lastEmptyLog = os.clock()
         end
-    end
-
-    print("[K] checkEmpty: foundAny:", foundAny, "queue:", #queue, "busy:", busy)
-
-    if not foundAny and #queue == 0 and not busy then
-        print("[K] Empty, hopping")
         serverHop()
     end
 end
 
 task.spawn(function()
-    while task.wait(RESCAN_DELAY) do scan() end
-end)
-
-task.spawn(function()
     while true do
-        if #queue > 0 then processQueue() else task.wait(0.25) end
-    end
-end)
-
-task.spawn(function()
-    while true do
-        checkEmpty()
-        task.wait(5)
+        scan()
+        if #queue > 0 then
+            processQueue()
+        else
+            checkEmpty()
+        end
+        task.wait(RESCAN_DELAY)
     end
 end)

@@ -3,7 +3,7 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 
 local TARGETS = {
-    GloEgg = true, HarvestEgg = true, FarmEgg = true, BattleEgg = true,
+    GloEgg = true, HarvestEgg = true, BattleEgg = true,
     BigGloEgg = true, BigHarvestEgg = true, BigFarmEgg = true
 }
 

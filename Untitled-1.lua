@@ -2,6 +2,7 @@
 --  Auto Farm (Egg Collection + Server Hop)
 --  Consolidated single-loop, robust fetch, no console spam
 --  + File-based hop tracking (visited_servers.json, hop_log.json, stats.json)
+--  + Client-safe session tracking (no BindToClose)
 -- ============================================================
 
 local Players          = game:GetService("Players")
@@ -24,17 +25,18 @@ local FIRE_RETRIES      = 3
 local FIRE_RETRY_DELAY  = 0.4
 local FETCH_ATTEMPTS    = 4
 local FETCH_BACKOFF     = 2
+local STATS_FLUSH_EVERY = 5   -- seconds between stats.json writes
 
 -- ---------- Tracking config ----------
-local LOG_FILE    = "hop_log.json"
+local LOG_FILE     = "hop_log.json"
 local VISITED_FILE = "visited_servers.json"
-local STATS_FILE  = "stats.json"
-local LOG_MAX     = 500   -- cap hop_log.json entries
+local STATS_FILE   = "stats.json"
+local LOG_MAX      = 500
 
 -- ---------- State ----------
-local fired  = {}   -- [prompt] = true
-local queued = {}   -- [prompt] = true  (already in queue)
-local queue  = {}   -- array of prompts
+local fired  = {}
+local queued = {}
+local queue  = {}
 
 local STATE = {
     busy          = false,
@@ -63,7 +65,7 @@ local function writeJSON(path, tbl)
     end)
 end
 
--- ---------- Visited server persistence ----------
+-- ---------- Visited servers ----------
 local function loadVisited()
     local visited = {}
     local data = readJSON(VISITED_FILE, {})
@@ -80,7 +82,7 @@ local function saveVisited(visited)
     writeJSON(VISITED_FILE, list)
 end
 
--- ---------- Hop log (append-only, capped) ----------
+-- ---------- Hop log ----------
 local function appendHopLog(entry)
     local log = readJSON(LOG_FILE, {})
     if type(log) ~= "table" then log = {} end
@@ -89,7 +91,7 @@ local function appendHopLog(entry)
     writeJSON(LOG_FILE, log)
 end
 
--- ---------- Stats (aggregate counters) ----------
+-- ---------- Stats (with debounced writes) ----------
 local function loadStats()
     local s = readJSON(STATS_FILE, nil)
     if type(s) ~= "table" then
@@ -105,32 +107,93 @@ local function loadStats()
     return s
 end
 
-local function saveStats(s)
-    s.lastJobId = game.JobId
-    s.placeId   = game.PlaceId
-    s.updatedAt = os.time()
-    writeJSON(STATS_FILE, s)
+local STATS          = loadStats()
+local STATS_DIRTY    = false
+local STATS_LASTFLUSH = 0
+
+local function markStatsDirty()
+    STATS_DIRTY = true
 end
 
-local STATS = loadStats()
+local function flushStats(force)
+    if not STATS_DIRTY and not force then return end
+    if not force and os.clock() - STATS_LASTFLUSH < STATS_FLUSH_EVERY then return end
+    STATS.lastJobId = game.JobId
+    STATS.placeId   = game.PlaceId
+    STATS.updatedAt = os.time()
+    writeJSON(STATS_FILE, STATS)
+    STATS_DIRTY      = false
+    STATS_LASTFLUSH  = os.clock()
+end
 
--- ---------- Boot log ----------
-local visited = loadVisited()
-do
-    local n = 0
-    for _ in pairs(visited) do n = n + 1 end
-    print("[K] Visited servers loaded:", n)
-    print(string.format("[K] Session start | job=%s | total hops logged=%d | eggs fired=%d",
-        game.JobId, STATS.hops or 0, STATS.eggsFired or 0))
+-- ---------- Session tracking (client-safe) ----------
+-- We can't use BindToClose on the client, so instead we:
+--   1. Log session_start on boot
+--   2. Keep an "active session" marker in stats.json
+--   3. Detect unclean prior shutdowns on the next boot
+--   4. Log a synthetic session_end for the previous job if we notice it went missing
 
-    -- Record this session's entry into the hop log
+local function startSession()
+    local prev = STATS.activeSession
+
+    -- If the last session never got a clean end, log it as unclean now.
+    if type(prev) == "table" and prev.jobId and prev.jobId ~= game.JobId and not prev.endedAt then
+        appendHopLog({
+            event   = "session_end_unclean",
+            jobId   = prev.jobId,
+            placeId = prev.placeId,
+            startedAt = prev.startedAt,
+            endedAt   = os.time(),
+            note    = "previous session did not close cleanly",
+        })
+    end
+
+    STATS.activeSession = {
+        jobId     = game.JobId,
+        placeId   = game.PlaceId,
+        startedAt = os.time(),
+        player    = Players.LocalPlayer and Players.LocalPlayer.Name or "?",
+    }
+    markStatsDirty()
+    flushStats(true)
+
     appendHopLog({
         event    = "session_start",
         jobId    = game.JobId,
         placeId  = game.PlaceId,
         at       = os.time(),
-        player   = Players.LocalPlayer and Players.LocalPlayer.Name or "?",
+        player   = STATS.activeSession.player,
     })
+end
+
+local function endSession(reason)
+    if type(STATS.activeSession) == "table" then
+        STATS.activeSession.endedAt = os.time()
+        STATS.activeSession.endReason = reason or "unknown"
+    end
+    markStatsDirty()
+    flushStats(true)
+
+    appendHopLog({
+        event     = "session_end",
+        jobId     = game.JobId,
+        at        = os.time(),
+        reason    = reason or "unknown",
+        eggsFired = STATS.eggsFired or 0,
+        hops      = STATS.hops or 0,
+    })
+end
+
+-- ---------- Boot ----------
+local visited = loadVisited()
+do
+    local n = 0
+    for _ in pairs(visited) do n = n + 1 end
+    print("[K] Visited servers loaded:", n)
+    print(string.format("[K] Session start | job=%s | total hops=%d | eggs fired=%d",
+        game.JobId, STATS.hops or 0, STATS.eggsFired or 0))
+
+    startSession()
 end
 
 -- ---------- Character helpers ----------
@@ -279,21 +342,24 @@ local function serverHop()
     local chosen = candidates[math.random(1, #candidates)]
     print("[K] Hop: teleporting to", chosen, "(" .. #candidates .. " candidates)")
 
-    -- ---------- Persistent tracking before we leave ----------
+    -- Mark the current session as ending due to a hop BEFORE we teleport.
+    -- This gives us a clean session_end even though the client unloads abruptly.
+    endSession("hop")
+
     STATS.hops      = (STATS.hops or 0) + 1
     STATS.lastHop   = os.time()
     STATS.eggsFired = STATS.eggsFired or 0
-    saveStats(STATS)
+    markStatsDirty()
+    flushStats(true)
 
     appendHopLog({
-        event     = "hop",
-        from      = game.JobId,
-        to        = chosen,
-        at        = os.time(),
+        event      = "hop",
+        from       = game.JobId,
+        to         = chosen,
+        at         = os.time(),
         candidates = #candidates,
-        hopNumber = STATS.hops,
+        hopNumber  = STATS.hops,
     })
-    -- ----------------------------------------------------------
 
     local requeue = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"))()'
 
@@ -368,7 +434,8 @@ local function processQueue()
                 if fireWithRetry(prompt, part) then
                     fired[prompt] = true
                     STATS.eggsFired = (STATS.eggsFired or 0) + 1
-                    saveStats(STATS)
+                    markStatsDirty()
+                    -- flushed periodically by the tracker loop below
                 end
             end
         end
@@ -404,6 +471,14 @@ local function checkEmpty()
     end
 end
 
+-- ---------- Periodic stats flusher ----------
+task.spawn(function()
+    while true do
+        task.wait(2)
+        pcall(flushStats, false)
+    end
+end)
+
 -- ---------- Main loop ----------
 task.spawn(function()
     while true do
@@ -424,15 +499,16 @@ task.spawn(function()
     end
 end)
 
--- ---------- Shutdown hook (best effort) ----------
-game:BindToClose(function()
-    appendHopLog({
-        event   = "session_end",
-        jobId   = game.JobId,
-        at      = os.time(),
-        eggsFired = STATS.eggsFired or 0,
-        hops    = STATS.hops or 0,
-    })
+-- ---------- Manual end hook (for executors that support it) ----------
+-- Some executors expose a script-unload hook. Wrap it in pcall so it's
+-- harmless if the function doesn't exist.
+pcall(function()
+    if type(getgenv) == "function" then
+        local env = getgenv()
+        env.__K_endSession = function()
+            pcall(endSession, "unload")
+        end
+    end
 end)
 
 print("[K] Loaded. Logs -> hop_log.json, stats.json, visited_servers.json")

@@ -9,7 +9,6 @@ local HttpService      = game:GetService("HttpService")
 
 -- ---------- Config ----------
 local TARGETS = {
-    BattleEgg = true,
     BigGloEgg = true, BigHarvestEgg = true, BigBattleEgg = true
 }
 

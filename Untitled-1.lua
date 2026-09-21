@@ -1,6 +1,7 @@
 -- ============================================================
 --  Auto Farm (Egg Collection + Server Hop)
 --  Consolidated single-loop, robust fetch, no console spam
+--  + File-based hop tracking (visited_servers.json, hop_log.json, stats.json)
 -- ============================================================
 
 local Players          = game:GetService("Players")
@@ -9,6 +10,7 @@ local HttpService      = game:GetService("HttpService")
 
 -- ---------- Config ----------
 local TARGETS = {
+    BattleEgg = true,
     BigGloEgg = true, BigHarvestEgg = true, BigBattleEgg = true
 }
 
@@ -22,6 +24,12 @@ local FIRE_RETRIES      = 3
 local FIRE_RETRY_DELAY  = 0.4
 local FETCH_ATTEMPTS    = 4
 local FETCH_BACKOFF     = 2
+
+-- ---------- Tracking config ----------
+local LOG_FILE    = "hop_log.json"
+local VISITED_FILE = "visited_servers.json"
+local STATS_FILE  = "stats.json"
+local LOG_MAX     = 500   -- cap hop_log.json entries
 
 -- ---------- State ----------
 local fired  = {}   -- [prompt] = true
@@ -37,16 +45,30 @@ local STATE = {
     lastFetchWarn = 0,
 }
 
+-- ============================================================
+--  File helpers
+-- ============================================================
+
+local function readJSON(path, fallback)
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(readfile(path))
+    end)
+    if ok and type(data) == "table" then return data end
+    return fallback
+end
+
+local function writeJSON(path, tbl)
+    pcall(function()
+        writefile(path, HttpService:JSONEncode(tbl))
+    end)
+end
+
 -- ---------- Visited server persistence ----------
 local function loadVisited()
     local visited = {}
-    local ok, data = pcall(function()
-        return HttpService:JSONDecode(readfile("visited_servers.json"))
-    end)
-    if ok and type(data) == "table" then
-        for _, id in ipairs(data) do
-            if type(id) == "string" then visited[id] = true end
-        end
+    local data = readJSON(VISITED_FILE, {})
+    for _, id in ipairs(data) do
+        if type(id) == "string" then visited[id] = true end
     end
     visited[game.JobId] = true
     return visited
@@ -55,16 +77,60 @@ end
 local function saveVisited(visited)
     local list = {}
     for id in pairs(visited) do table.insert(list, id) end
-    pcall(function()
-        writefile("visited_servers.json", HttpService:JSONEncode(list))
-    end)
+    writeJSON(VISITED_FILE, list)
 end
 
+-- ---------- Hop log (append-only, capped) ----------
+local function appendHopLog(entry)
+    local log = readJSON(LOG_FILE, {})
+    if type(log) ~= "table" then log = {} end
+    table.insert(log, entry)
+    while #log > LOG_MAX do table.remove(log, 1) end
+    writeJSON(LOG_FILE, log)
+end
+
+-- ---------- Stats (aggregate counters) ----------
+local function loadStats()
+    local s = readJSON(STATS_FILE, nil)
+    if type(s) ~= "table" then
+        s = {
+            hops = 0,
+            eggsFired = 0,
+            firstSeen = os.time(),
+            lastHop = nil,
+            lastJobId = nil,
+            placeId = game.PlaceId,
+        }
+    end
+    return s
+end
+
+local function saveStats(s)
+    s.lastJobId = game.JobId
+    s.placeId   = game.PlaceId
+    s.updatedAt = os.time()
+    writeJSON(STATS_FILE, s)
+end
+
+local STATS = loadStats()
+
+-- ---------- Boot log ----------
 local visited = loadVisited()
 do
     local n = 0
     for _ in pairs(visited) do n = n + 1 end
     print("[K] Visited servers loaded:", n)
+    print(string.format("[K] Session start | job=%s | total hops logged=%d | eggs fired=%d",
+        game.JobId, STATS.hops or 0, STATS.eggsFired or 0))
+
+    -- Record this session's entry into the hop log
+    appendHopLog({
+        event    = "session_start",
+        jobId    = game.JobId,
+        placeId  = game.PlaceId,
+        at       = os.time(),
+        player   = Players.LocalPlayer and Players.LocalPlayer.Name or "?",
+    })
 end
 
 -- ---------- Character helpers ----------
@@ -103,7 +169,6 @@ local function fireWithRetry(prompt, part)
 end
 
 -- ---------- Server list fetching ----------
--- Tries multiple endpoints and returns a list of {id = ...} entries, or nil.
 local function fetchServers()
     local placeId = game.PlaceId
     local endpoints = {
@@ -136,7 +201,6 @@ local function fetchServers()
                         end
                     end
                 end
-                -- non-JSON response: fall through to next endpoint
             end
 
             task.wait(0.5)
@@ -173,6 +237,12 @@ local function serverHop()
 
     if not servers then
         warn("[K] Hop: could not fetch server list. Short cooldown, will retry.")
+        appendHopLog({
+            event   = "hop_failed",
+            reason  = "fetch_failed",
+            from    = game.JobId,
+            at      = os.time(),
+        })
         STATE.hopping   = false
         STATE.lastHopAt = os.clock() - HOP_COOLDOWN + 4
         return
@@ -193,14 +263,37 @@ local function serverHop()
 
     if #candidates == 0 then
         print("[K] Hop: no fresh servers, resetting visited cache")
+        appendHopLog({
+            event   = "visited_reset",
+            reason  = "no_fresh_candidates",
+            from    = game.JobId,
+            at      = os.time(),
+        })
         visited = { [game.JobId] = true }
         saveVisited(visited)
-        STATE.hopping = false
+        STATE.hopping   = false
+        STATE.lastHopAt = os.clock() - HOP_COOLDOWN + 2
         return
     end
 
     local chosen = candidates[math.random(1, #candidates)]
     print("[K] Hop: teleporting to", chosen, "(" .. #candidates .. " candidates)")
+
+    -- ---------- Persistent tracking before we leave ----------
+    STATS.hops      = (STATS.hops or 0) + 1
+    STATS.lastHop   = os.time()
+    STATS.eggsFired = STATS.eggsFired or 0
+    saveStats(STATS)
+
+    appendHopLog({
+        event     = "hop",
+        from      = game.JobId,
+        to        = chosen,
+        at        = os.time(),
+        candidates = #candidates,
+        hopNumber = STATS.hops,
+    })
+    -- ----------------------------------------------------------
 
     local requeue = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/ProcessHandle/Roblox-Scripts/refs/heads/main/Untitled-1.lua"))()'
 
@@ -220,17 +313,21 @@ local function serverHop()
 
     if not success then
         warn("[K] Hop: teleport failed:", err)
+        appendHopLog({
+            event  = "teleport_failed",
+            from   = game.JobId,
+            to     = chosen,
+            error  = tostring(err),
+            at     = os.time(),
+        })
         STATE.hopping = false
     end
-    -- if success, Roblox unloads us; no need to reset
 end
 
 -- ---------- Scanning ----------
 local function scan()
-    local found = 0
     for _, child in ipairs(workspace:GetChildren()) do
         if TARGETS[child.Name] then
-            found = found + 1
             for _, desc in ipairs(child:GetDescendants()) do
                 if desc:IsA("ProximityPrompt")
                     and not fired[desc]
@@ -270,6 +367,8 @@ local function processQueue()
             if part:IsA("BasePart") then
                 if fireWithRetry(prompt, part) then
                     fired[prompt] = true
+                    STATS.eggsFired = (STATS.eggsFired or 0) + 1
+                    saveStats(STATS)
                 end
             end
         end
@@ -282,9 +381,13 @@ end
 
 -- ---------- Empty check ----------
 local function checkEmpty()
-    -- recover from a hop that never unloaded us
     if STATE.hopping and os.clock() - STATE.hopStartedAt > HOP_TIMEOUT then
         warn("[K] Hop timeout, resetting hop state")
+        appendHopLog({
+            event  = "hop_timeout",
+            from   = game.JobId,
+            at     = os.time(),
+        })
         STATE.hopping = false
     end
 
@@ -321,4 +424,15 @@ task.spawn(function()
     end
 end)
 
-print("[K] Loaded.")
+-- ---------- Shutdown hook (best effort) ----------
+game:BindToClose(function()
+    appendHopLog({
+        event   = "session_end",
+        jobId   = game.JobId,
+        at      = os.time(),
+        eggsFired = STATS.eggsFired or 0,
+        hops    = STATS.hops or 0,
+    })
+end)
+
+print("[K] Loaded. Logs -> hop_log.json, stats.json, visited_servers.json")

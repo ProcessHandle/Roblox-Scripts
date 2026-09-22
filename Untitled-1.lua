@@ -23,11 +23,6 @@ local LOG_FILE = "rejoin_log.json"
 local STATS_FILE = "stats.json"
 local LOG_MAX = 500
 
-local ANY_EGG = {
-    BattleEgg = true,
-    BigGloEgg = true, BigHarvestEgg = true, BigBattleEgg = true,
-}
-
 local fired = {}
 local queued = {}
 local queue = {}
@@ -263,6 +258,10 @@ local function rejoin()
     end
 end
 
+local function isEggName(name)
+    return type(name) == "string" and name:match("Egg$") ~= nil
+end
+
 local function scan()
     for _, child in ipairs(workspace:GetChildren()) do
         if TARGETS[child.Name] then
@@ -291,7 +290,7 @@ end
 
 local function anyEggPresent()
     for _, child in ipairs(workspace:GetChildren()) do
-        if ANY_EGG[child.Name] then return true end
+        if isEggName(child.Name) then return true end
     end
     return false
 end

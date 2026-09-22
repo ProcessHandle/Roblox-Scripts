@@ -23,6 +23,7 @@ local STATS_FILE = "stats.json"
 local LOG_MAX = 500
 
 local ANY_EGG = {
+    BattleEgg = true,
     BigGloEgg = true, BigHarvestEgg = true, BigBattleEgg = true,
 }
 

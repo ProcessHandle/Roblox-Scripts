@@ -1,17 +1,7 @@
--- ============================================================
---  Auto Farm (Egg Collection + Server Hop)
---  Consolidated single-loop, robust fetch, no console spam
---  + File-based hop tracking (visited_servers.json, hop_log.json, stats.json)
---  + Client-safe session tracking (no BindToClose)
---  + Chain-aware hopping: never returns to the previous server
---  + Weighted-random hopping: biased toward smaller (emptier) servers
--- ============================================================
-
 local Players          = game:GetService("Players")
 local TeleportService  = game:GetService("TeleportService")
 local HttpService      = game:GetService("HttpService")
 
--- ---------- Config ----------
 local TARGETS = {
     BigGloEgg = true, BigHarvestEgg = true, BigBattleEgg = true
 }
@@ -26,20 +16,14 @@ local FIRE_RETRIES      = 3
 local FIRE_RETRY_DELAY  = 0.4
 local FETCH_ATTEMPTS    = 4
 local FETCH_BACKOFF     = 2
-local STATS_FLUSH_EVERY = 5   -- seconds between stats.json writes
-
--- How many recent servers to keep in the "recently visited" set.
--- When we run out of fresh candidates we trim down to this many
--- (most recent first) instead of wiping the whole list.
+local STATS_FLUSH_EVERY = 5
 local VISITED_KEEP_RECENT = 30
 
--- ---------- Tracking config ----------
 local LOG_FILE     = "hop_log.json"
 local VISITED_FILE = "visited_servers.json"
 local STATS_FILE   = "stats.json"
 local LOG_MAX      = 500
 
--- ---------- State ----------
 local fired  = {}
 local queued = {}
 local queue  = {}
@@ -52,10 +36,6 @@ local STATE = {
     lastEmptyLog  = 0,
     lastFetchWarn = 0,
 }
-
--- ============================================================
---  File helpers
--- ============================================================
 
 local function readJSON(path, fallback)
     local ok, data = pcall(function()
@@ -71,14 +51,10 @@ local function writeJSON(path, tbl)
     end)
 end
 
--- ---------- Visited servers (ordered list, most recent last) ----------
--- Stored as an array of { id = <string>, at = <os.time> } so we can
--- trim the oldest entries when we need to free up candidates.
 local function loadVisited()
     local list = readJSON(VISITED_FILE, {})
     if type(list) ~= "table" then list = {} end
 
-    -- Backwards-compat: old format was a flat array of strings.
     local visited = {}
     for _, entry in ipairs(list) do
         if type(entry) == "string" then
@@ -96,12 +72,10 @@ local function saveVisited(visited)
     for id, at in pairs(visited) do
         table.insert(list, { id = id, at = at })
     end
-    -- Most recent last
     table.sort(list, function(a, b) return a.at < b.at end)
     writeJSON(VISITED_FILE, list)
 end
 
--- Drop the oldest visited entries until we're at or below `keep`.
 local function trimVisited(visited, keep, protect)
     keep = keep or VISITED_KEEP_RECENT
     protect = protect or {}
@@ -110,7 +84,7 @@ local function trimVisited(visited, keep, protect)
     for id, at in pairs(visited) do
         table.insert(list, { id = id, at = at })
     end
-    table.sort(list, function(a, b) return a.at < b.at end) -- oldest first
+    table.sort(list, function(a, b) return a.at < b.at end)
 
     local removed = 0
     for _, entry in ipairs(list) do
@@ -125,7 +99,6 @@ local function trimVisited(visited, keep, protect)
     return removed
 end
 
--- ---------- Hop log ----------
 local function appendHopLog(entry)
     local log = readJSON(LOG_FILE, {})
     if type(log) ~= "table" then log = {} end
@@ -134,7 +107,6 @@ local function appendHopLog(entry)
     writeJSON(LOG_FILE, log)
 end
 
--- ---------- Stats (with debounced writes) ----------
 local function loadStats()
     local s = readJSON(STATS_FILE, nil)
     if type(s) ~= "table" then
@@ -144,8 +116,8 @@ local function loadStats()
             firstSeen = os.time(),
             lastHop = nil,
             lastJobId = nil,
-            lastHopFrom = nil,   -- server we were on before the last hop
-            lastHopTo   = nil,   -- server we landed on after the last hop
+            lastHopFrom = nil,
+            lastHopTo   = nil,
             placeId = game.PlaceId,
         }
     end
@@ -171,7 +143,6 @@ local function flushStats(force)
     STATS_LASTFLUSH  = os.clock()
 end
 
--- ---------- Session tracking (client-safe) ----------
 local function startSession()
     local prev = STATS.activeSession
 
@@ -222,7 +193,6 @@ local function endSession(reason)
     })
 end
 
--- ---------- Boot ----------
 local visited = loadVisited()
 do
     local n = 0
@@ -236,7 +206,6 @@ do
     startSession()
 end
 
--- ---------- Character helpers ----------
 local function getRoot()
     local lp = Players.LocalPlayer
     if not lp then
@@ -250,7 +219,6 @@ local function getRoot()
     return char:WaitForChild("HumanoidRootPart", 5)
 end
 
--- ---------- Prompt firing ----------
 local function fireWithRetry(prompt, part)
     for attempt = 1, FIRE_RETRIES do
         if not prompt or not prompt.Parent then return true end
@@ -271,7 +239,6 @@ local function fireWithRetry(prompt, part)
     return false
 end
 
--- ---------- Server list fetching ----------
 local function fetchServers()
     local placeId = game.PlaceId
     local endpoints = {
@@ -321,11 +288,6 @@ local function fetchServers()
     return nil
 end
 
--- ---------- Weighted pick (bias toward emptier servers) ----------
--- Each candidate's weight is 1 / (playing + 1), so an empty server is
--- roughly 6x more likely than a 5-player one and ~20x more likely than
--- a 20-player one, but not guaranteed -- keeps 100 bots from all
--- slamming the same near-empty lobby.
 local function pickWeighted(list)
     if #list == 0 then return nil end
 
@@ -346,7 +308,6 @@ local function pickWeighted(list)
     return list[#list]
 end
 
--- ---------- Hop ----------
 local function serverHop()
     if STATE.hopping then return end
     if os.clock() - STATE.lastHopAt < HOP_COOLDOWN then return end
@@ -356,10 +317,9 @@ local function serverHop()
     STATE.lastHopAt    = os.clock()
     STATE.hopStartedAt = os.clock()
 
-    -- Mark current + remember what we're leaving
     local fromJob = game.JobId
-    local previousHopFrom = STATS.lastHopFrom  -- server before our last hop
-    local previousHopTo   = STATS.lastHopTo    -- server we landed on last hop
+    local previousHopFrom = STATS.lastHopFrom
+    local previousHopTo   = STATS.lastHopTo
 
     visited[fromJob] = os.time()
     saveVisited(visited)
@@ -381,18 +341,12 @@ local function serverHop()
         return
     end
 
-    -- Servers we must never pick as the next hop:
-    --   * the current server
-    --   * the server we just came from (previousHopFrom)
-    --   * the server we landed on last time (previousHopTo) -- same as current
-    --     after a successful hop, but guards against requeue timing
     local banned = {
         [fromJob]             = true,
         [previousHopFrom or ""] = true,
         [previousHopTo   or ""] = true,
     }
 
-    -- Collect candidates as {id, playing} tables so we can weight them.
     local function collect(allowRevisit)
         local out = {}
         for _, v in ipairs(servers) do
@@ -414,8 +368,6 @@ local function serverHop()
 
     local candidates = collect(false)
 
-    -- Fallback: if we've already visited every open server, trim the
-    -- visited cache and allow revisits, but still never the previous hop.
     if #candidates == 0 then
         print("[K] Hop: no fresh servers; trimming visited cache and allowing revisits")
 
@@ -437,7 +389,6 @@ local function serverHop()
     end
 
     if #candidates == 0 then
-        -- Extremely rare: everything is full or banned. Back off and retry.
         warn("[K] Hop: no valid candidates at all; backing off")
         appendHopLog({
             event  = "hop_failed",
@@ -450,7 +401,6 @@ local function serverHop()
         return
     end
 
-    -- Weighted-random pick, biased toward emptier servers.
     local pick = pickWeighted(candidates)
     local chosen = pick.id
     print(string.format(
@@ -458,8 +408,6 @@ local function serverHop()
         chosen, #candidates, pick.playing
     ))
 
-    -- Persist the hop edge *before* teleporting so the next session
-    -- (reloaded via queue_on_teleport) inherits the chain.
     STATS.lastHopFrom = fromJob
     STATS.lastHopTo   = chosen
     STATS.hops        = (STATS.hops or 0) + 1
@@ -469,7 +417,6 @@ local function serverHop()
     visited[chosen] = os.time()
     saveVisited(visited)
 
-    -- Clean session end so hop_log shows the boundary.
     endSession("hop")
 
     flushStats(true)
@@ -509,8 +456,6 @@ local function serverHop()
             error  = tostring(err),
             at     = os.time(),
         })
-        -- Roll back the chain edge so the next attempt doesn't inherit
-        -- a hop that never happened.
         STATS.lastHopFrom = previousHopFrom
         STATS.lastHopTo   = previousHopTo
         STATS.hops        = math.max(0, (STATS.hops or 1) - 1)
@@ -524,7 +469,6 @@ local function serverHop()
     end
 end
 
--- ---------- Scanning ----------
 local function scan()
     for _, child in ipairs(workspace:GetChildren()) do
         if TARGETS[child.Name] then
@@ -551,7 +495,6 @@ local function hasTargets()
     return false
 end
 
--- ---------- Queue processing ----------
 local function processQueue()
     if STATE.busy then return end
     STATE.busy = true
@@ -579,7 +522,6 @@ local function processQueue()
     STATE.busy = false
 end
 
--- ---------- Empty check ----------
 local function checkEmpty()
     if STATE.hopping and os.clock() - STATE.hopStartedAt > HOP_TIMEOUT then
         warn("[K] Hop timeout, resetting hop state")
@@ -604,7 +546,6 @@ local function checkEmpty()
     end
 end
 
--- ---------- Periodic stats flusher ----------
 task.spawn(function()
     while true do
         task.wait(2)
@@ -612,7 +553,6 @@ task.spawn(function()
     end
 end)
 
--- ---------- Main loop ----------
 task.spawn(function()
     while true do
         local ok, err = pcall(function()
@@ -632,7 +572,6 @@ task.spawn(function()
     end
 end)
 
--- ---------- Manual end hook (for executors that support it) ----------
 pcall(function()
     if type(getgenv) == "function" then
         local env = getgenv()

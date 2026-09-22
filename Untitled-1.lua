@@ -12,6 +12,7 @@ local RESCAN_DELAY = 2
 local REJOIN_DELAY = 3
 local REJOIN_COOLDOWN = 12
 local REJOIN_TIMEOUT = 25
+local MIN_SETTLE = 3
 local JOIN_SETTLE = 18
 local FIRE_RETRIES = 3
 local FIRE_RETRY_DELAY = 0.4
@@ -20,6 +21,10 @@ local STATS_FLUSH_EVERY = 5
 local LOG_FILE = "rejoin_log.json"
 local STATS_FILE = "stats.json"
 local LOG_MAX = 500
+
+local ANY_EGG = {
+    BigGloEgg = true, BigHarvestEgg = true, BigBattleEgg = true,
+}
 
 local fired = {}
 local queued = {}
@@ -143,7 +148,7 @@ end
 do
     print(string.format("[K] Session start | job=%s | total rejoins=%d | eggs fired=%d",
         game.JobId, STATS.rejoins or 0, STATS.eggsFired or 0))
-    print(string.format("[K] Join settle window: %ds", JOIN_SETTLE))
+    print(string.format("[K] Settle window: min=%ds max=%ds", MIN_SETTLE, JOIN_SETTLE))
     startSession()
 end
 
@@ -231,7 +236,13 @@ local function rejoin()
     task.wait(REJOIN_DELAY)
 
     local success, err = pcall(function()
-        TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
+        if #Players:GetPlayers() <= 1 then
+            Players.LocalPlayer:Kick("\nRejoining...")
+            task.wait(0.3)
+            TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
+        else
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, Players.LocalPlayer)
+        end
     end)
 
     if not success then
@@ -272,6 +283,13 @@ end
 local function hasTargets()
     for _, child in ipairs(workspace:GetChildren()) do
         if TARGETS[child.Name] then return true end
+    end
+    return false
+end
+
+local function anyEggPresent()
+    for _, child in ipairs(workspace:GetChildren()) do
+        if ANY_EGG[child.Name] then return true end
     end
     return false
 end
@@ -318,13 +336,27 @@ local function checkEmpty()
         return
     end
 
-    if os.clock() - STATE.joinedAt < JOIN_SETTLE then
+    local elapsed = os.clock() - STATE.joinedAt
+
+    if elapsed < MIN_SETTLE then
         return
     end
 
-    if not hasTargets() then
+    if anyEggPresent() then
+        if hasTargets() then
+            return
+        end
         if os.clock() - STATE.lastEmptyLog > 5 then
-            print(string.format("[K] No targets after %ds settle, rejoining...", JOIN_SETTLE))
+            print("[K] Non-target egg spawned, rejoining...")
+            STATE.lastEmptyLog = os.clock()
+        end
+        rejoin()
+        return
+    end
+
+    if elapsed > JOIN_SETTLE then
+        if os.clock() - STATE.lastEmptyLog > 5 then
+            print(string.format("[K] No egg after %ds, rejoining...", JOIN_SETTLE))
             STATE.lastEmptyLog = os.clock()
         end
         rejoin()

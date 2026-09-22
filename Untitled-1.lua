@@ -6,32 +6,32 @@ local TARGETS = {
     BigGloEgg = true, BigHarvestEgg = true, BigBattleEgg = true
 }
 
-local TP_DELAY          = 0.5
-local FIRE_COOLDOWN     = 1.5
-local RESCAN_DELAY      = 2
-local REJOIN_DELAY      = 3
-local REJOIN_COOLDOWN   = 12
-local REJOIN_TIMEOUT    = 25
-local JOIN_SETTLE       = 20
-local FIRE_RETRIES      = 3
-local FIRE_RETRY_DELAY  = 0.4
+local TP_DELAY = 0.5
+local FIRE_COOLDOWN = 1.5
+local RESCAN_DELAY = 2
+local REJOIN_DELAY = 3
+local REJOIN_COOLDOWN = 12
+local REJOIN_TIMEOUT = 25
+local JOIN_SETTLE = 20
+local FIRE_RETRIES = 3
+local FIRE_RETRY_DELAY = 0.4
 local STATS_FLUSH_EVERY = 5
 
-local LOG_FILE    = "rejoin_log.json"
-local STATS_FILE  = "stats.json"
-local LOG_MAX     = 500
+local LOG_FILE = "rejoin_log.json"
+local STATS_FILE = "stats.json"
+local LOG_MAX= 500
 
-local fired  = {}
+local fired = {}
 local queued = {}
-local queue  = {}
+local queue = {}
 
 local STATE = {
-    busy          = false,
-    hopping       = false,
-    lastHopAt     = 0,
-    hopStartedAt  = 0,
-    joinedAt      = os.clock(),
-    lastEmptyLog  = 0,
+    busy = false,
+    hopping = false,
+    lastHopAt = 0,
+    hopStartedAt = 0,
+    joinedAt = os.clock(),
+    lastEmptyLog = 0,
 }
 
 local function readJSON(path, fallback)

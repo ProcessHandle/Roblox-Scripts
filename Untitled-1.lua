@@ -3,6 +3,7 @@
 --  Consolidated single-loop, robust fetch, no console spam
 --  + File-based hop tracking (visited_servers.json, hop_log.json, stats.json)
 --  + Client-safe session tracking (no BindToClose)
+--  + Chain-aware hopping: never returns to the previous server
 -- ============================================================
 
 local Players          = game:GetService("Players")
@@ -26,6 +27,11 @@ local FIRE_RETRY_DELAY  = 0.4
 local FETCH_ATTEMPTS    = 4
 local FETCH_BACKOFF     = 2
 local STATS_FLUSH_EVERY = 5   -- seconds between stats.json writes
+
+-- How many recent servers to keep in the "recently visited" set.
+-- When we run out of fresh candidates we trim down to this many
+-- (most recent first) instead of wiping the whole list.
+local VISITED_KEEP_RECENT = 30
 
 -- ---------- Tracking config ----------
 local LOG_FILE     = "hop_log.json"
@@ -65,21 +71,58 @@ local function writeJSON(path, tbl)
     end)
 end
 
--- ---------- Visited servers ----------
+-- ---------- Visited servers (ordered list, most recent last) ----------
+-- Stored as an array of { id = <string>, at = <os.time> } so we can
+-- trim the oldest entries when we need to free up candidates.
 local function loadVisited()
+    local list = readJSON(VISITED_FILE, {})
+    if type(list) ~= "table" then list = {} end
+
+    -- Backwards-compat: old format was a flat array of strings.
     local visited = {}
-    local data = readJSON(VISITED_FILE, {})
-    for _, id in ipairs(data) do
-        if type(id) == "string" then visited[id] = true end
+    for _, entry in ipairs(list) do
+        if type(entry) == "string" then
+            visited[entry] = os.time()
+        elseif type(entry) == "table" and type(entry.id) == "string" then
+            visited[entry.id] = tonumber(entry.at) or os.time()
+        end
     end
-    visited[game.JobId] = true
+    visited[game.JobId] = os.time()
     return visited
 end
 
 local function saveVisited(visited)
     local list = {}
-    for id in pairs(visited) do table.insert(list, id) end
+    for id, at in pairs(visited) do
+        table.insert(list, { id = id, at = at })
+    end
+    -- Most recent last
+    table.sort(list, function(a, b) return a.at < b.at end)
     writeJSON(VISITED_FILE, list)
+end
+
+-- Drop the oldest visited entries until we're at or below `keep`.
+local function trimVisited(visited, keep, protect)
+    keep = keep or VISITED_KEEP_RECENT
+    protect = protect or {}
+
+    local list = {}
+    for id, at in pairs(visited) do
+        table.insert(list, { id = id, at = at })
+    end
+    table.sort(list, function(a, b) return a.at < b.at end) -- oldest first
+
+    local removed = 0
+    for _, entry in ipairs(list) do
+        local n = 0
+        for _ in pairs(visited) do n = n + 1 end
+        if n <= keep then break end
+        if not protect[entry.id] then
+            visited[entry.id] = nil
+            removed = removed + 1
+        end
+    end
+    return removed
 end
 
 -- ---------- Hop log ----------
@@ -101,6 +144,8 @@ local function loadStats()
             firstSeen = os.time(),
             lastHop = nil,
             lastJobId = nil,
+            lastHopFrom = nil,   -- server we were on before the last hop
+            lastHopTo   = nil,   -- server we landed on after the last hop
             placeId = game.PlaceId,
         }
     end
@@ -127,16 +172,9 @@ local function flushStats(force)
 end
 
 -- ---------- Session tracking (client-safe) ----------
--- We can't use BindToClose on the client, so instead we:
---   1. Log session_start on boot
---   2. Keep an "active session" marker in stats.json
---   3. Detect unclean prior shutdowns on the next boot
---   4. Log a synthetic session_end for the previous job if we notice it went missing
-
 local function startSession()
     local prev = STATS.activeSession
 
-    -- If the last session never got a clean end, log it as unclean now.
     if type(prev) == "table" and prev.jobId and prev.jobId ~= game.JobId and not prev.endedAt then
         appendHopLog({
             event   = "session_end_unclean",
@@ -192,6 +230,8 @@ do
     print("[K] Visited servers loaded:", n)
     print(string.format("[K] Session start | job=%s | total hops=%d | eggs fired=%d",
         game.JobId, STATS.hops or 0, STATS.eggsFired or 0))
+    print(string.format("[K] Last hop: %s -> %s",
+        tostring(STATS.lastHopFrom), tostring(STATS.lastHopTo)))
 
     startSession()
 end
@@ -291,10 +331,15 @@ local function serverHop()
     STATE.lastHopAt    = os.clock()
     STATE.hopStartedAt = os.clock()
 
-    visited[game.JobId] = true
+    -- Mark current + remember what we're leaving
+    local fromJob = game.JobId
+    local previousHopFrom = STATS.lastHopFrom  -- server before our last hop
+    local previousHopTo   = STATS.lastHopTo    -- server we landed on last hop
+
+    visited[fromJob] = os.time()
     saveVisited(visited)
 
-    print("[K] Hop: fetching server list (from", game.JobId .. ")")
+    print("[K] Hop: fetching server list (from", fromJob .. ")")
 
     local servers = fetchServers()
 
@@ -303,7 +348,7 @@ local function serverHop()
         appendHopLog({
             event   = "hop_failed",
             reason  = "fetch_failed",
-            from    = game.JobId,
+            from    = fromJob,
             at      = os.time(),
         })
         STATE.hopping   = false
@@ -311,50 +356,99 @@ local function serverHop()
         return
     end
 
+    -- Servers we must never pick as the next hop:
+    --   * the current server
+    --   * the server we just came from (previousHopFrom)
+    --   * the server we landed on last time (previousHopTo) -- same as current
+    --     after a successful hop, but guards against requeue timing
+    local banned = {
+        [fromJob]             = true,
+        [previousHopFrom or ""] = true,
+        [previousHopTo   or ""] = true,
+    }
+
     local candidates = {}
     for _, v in ipairs(servers) do
         if type(v) == "table"
             and type(v.id) == "string"
             and tonumber(v.playing) and tonumber(v.maxPlayers)
             and v.playing < v.maxPlayers
-            and v.id ~= game.JobId
+            and not banned[v.id]
             and not visited[v.id]
         then
             table.insert(candidates, v.id)
         end
     end
 
+    -- Fallback: if we've already visited every open server, prefer servers
+    -- that aren't the previous hop, then allow revisits, but never the
+    -- server we just came from.
     if #candidates == 0 then
-        print("[K] Hop: no fresh servers, resetting visited cache")
+        print("[K] Hop: no fresh servers; trimming visited cache and allowing revisits")
+
+        local removed = trimVisited(visited, VISITED_KEEP_RECENT, {
+            [fromJob] = true,
+            [previousHopFrom or ""] = true,
+        })
+        saveVisited(visited)
+
         appendHopLog({
-            event   = "visited_reset",
+            event   = "visited_trim",
             reason  = "no_fresh_candidates",
-            from    = game.JobId,
+            from    = fromJob,
+            removed = removed,
             at      = os.time(),
         })
-        visited = { [game.JobId] = true }
-        saveVisited(visited)
+
+        for _, v in ipairs(servers) do
+            if type(v) == "table"
+                and type(v.id) == "string"
+                and tonumber(v.playing) and tonumber(v.maxPlayers)
+                and v.playing < v.maxPlayers
+                and not banned[v.id]
+            then
+                table.insert(candidates, v.id)
+            end
+        end
+    end
+
+    if #candidates == 0 then
+        -- Extremely rare: everything is full or banned. Back off and retry.
+        warn("[K] Hop: no valid candidates at all; backing off")
+        appendHopLog({
+            event  = "hop_failed",
+            reason = "no_candidates",
+            from   = fromJob,
+            at     = os.time(),
+        })
         STATE.hopping   = false
-        STATE.lastHopAt = os.clock() - HOP_COOLDOWN + 2
+        STATE.lastHopAt = os.clock() - HOP_COOLDOWN + 6
         return
     end
 
+    -- Avoid re-picking the same candidate on retry after a failure.
     local chosen = candidates[math.random(1, #candidates)]
     print("[K] Hop: teleporting to", chosen, "(" .. #candidates .. " candidates)")
 
-    -- Mark the current session as ending due to a hop BEFORE we teleport.
-    -- This gives us a clean session_end even though the client unloads abruptly.
+    -- Persist the hop edge *before* teleporting so the next session
+    -- (reloaded via queue_on_teleport) inherits the chain.
+    STATS.lastHopFrom = fromJob
+    STATS.lastHopTo   = chosen
+    STATS.hops        = (STATS.hops or 0) + 1
+    STATS.lastHop     = os.time()
+    markStatsDirty()
+
+    visited[chosen] = os.time()
+    saveVisited(visited)
+
+    -- Clean session end so hop_log shows the boundary.
     endSession("hop")
 
-    STATS.hops      = (STATS.hops or 0) + 1
-    STATS.lastHop   = os.time()
-    STATS.eggsFired = STATS.eggsFired or 0
-    markStatsDirty()
     flushStats(true)
 
     appendHopLog({
         event      = "hop",
-        from       = game.JobId,
+        from       = fromJob,
         to         = chosen,
         at         = os.time(),
         candidates = #candidates,
@@ -381,11 +475,22 @@ local function serverHop()
         warn("[K] Hop: teleport failed:", err)
         appendHopLog({
             event  = "teleport_failed",
-            from   = game.JobId,
+            from   = fromJob,
             to     = chosen,
             error  = tostring(err),
             at     = os.time(),
         })
+        -- Roll back the chain edge so the next attempt doesn't inherit
+        -- a hop that never happened.
+        STATS.lastHopFrom = previousHopFrom
+        STATS.lastHopTo   = previousHopTo
+        STATS.hops        = math.max(0, (STATS.hops or 1) - 1)
+        markStatsDirty()
+        flushStats(true)
+
+        visited[chosen] = nil
+        saveVisited(visited)
+
         STATE.hopping = false
     end
 end
@@ -435,7 +540,6 @@ local function processQueue()
                     fired[prompt] = true
                     STATS.eggsFired = (STATS.eggsFired or 0) + 1
                     markStatsDirty()
-                    -- flushed periodically by the tracker loop below
                 end
             end
         end
@@ -500,8 +604,6 @@ task.spawn(function()
 end)
 
 -- ---------- Manual end hook (for executors that support it) ----------
--- Some executors expose a script-unload hook. Wrap it in pcall so it's
--- harmless if the function doesn't exist.
 pcall(function()
     if type(getgenv) == "function" then
         local env = getgenv()

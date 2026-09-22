@@ -4,7 +4,7 @@ local HttpService = game:GetService("HttpService")
 
 local TARGETS = {
     BattleEgg = true, GloEgg = true,
-    BigGloEgg = true, BigHarvestEgg = true, BigBattleEgg = true
+    BigGloEgg = true, BigHarvestEgg = true, BigBattleEgg = true, BigFarmEgg = true, BigSnailEgg = true
 }
 
 local TP_DELAY = 0.5

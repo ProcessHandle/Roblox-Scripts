@@ -1,6 +1,6 @@
-local Players          = game:GetService("Players")
-local TeleportService  = game:GetService("TeleportService")
-local HttpService      = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 
 local TARGETS = {
     BigGloEgg = true, BigHarvestEgg = true, BigBattleEgg = true
@@ -19,7 +19,7 @@ local STATS_FLUSH_EVERY = 5
 
 local LOG_FILE = "rejoin_log.json"
 local STATS_FILE = "stats.json"
-local LOG_MAX= 500
+local LOG_MAX = 500
 
 local fired = {}
 local queued = {}
@@ -60,19 +60,19 @@ local function loadStats()
     local s = readJSON(STATS_FILE, nil)
     if type(s) ~= "table" then
         s = {
-            rejoins    = 0,
-            eggsFired  = 0,
-            firstSeen  = os.time(),
+            rejoins = 0,
+            eggsFired = 0,
+            firstSeen = os.time(),
             lastRejoin = nil,
-            lastJobId  = nil,
-            placeId    = game.PlaceId,
+            lastJobId = nil,
+            placeId = game.PlaceId,
         }
     end
     return s
 end
 
-local STATS           = loadStats()
-local STATS_DIRTY     = false
+local STATS = loadStats()
+local STATS_DIRTY = false
 local STATS_LASTFLUSH = 0
 
 local function markStatsDirty()
@@ -83,10 +83,10 @@ local function flushStats(force)
     if not STATS_DIRTY and not force then return end
     if not force and os.clock() - STATS_LASTFLUSH < STATS_FLUSH_EVERY then return end
     STATS.lastJobId = game.JobId
-    STATS.placeId   = game.PlaceId
+    STATS.placeId = game.PlaceId
     STATS.updatedAt = os.time()
     writeJSON(STATS_FILE, STATS)
-    STATS_DIRTY     = false
+    STATS_DIRTY = false
     STATS_LASTFLUSH = os.clock()
 end
 
@@ -95,48 +95,48 @@ local function startSession()
 
     if type(prev) == "table" and prev.jobId and prev.jobId ~= game.JobId and not prev.endedAt then
         appendRejoinLog({
-            event     = "session_end_unclean",
-            jobId     = prev.jobId,
-            placeId   = prev.placeId,
+            event = "session_end_unclean",
+            jobId = prev.jobId,
+            placeId = prev.placeId,
             startedAt = prev.startedAt,
-            endedAt   = os.time(),
-            note      = "previous session did not close cleanly",
+            endedAt = os.time(),
+            note = "previous session did not close cleanly",
         })
     end
 
     STATS.activeSession = {
-        jobId     = game.JobId,
-        placeId   = game.PlaceId,
+        jobId = game.JobId,
+        placeId = game.PlaceId,
         startedAt = os.time(),
-        player    = Players.LocalPlayer and Players.LocalPlayer.Name or "?",
+        player = Players.LocalPlayer and Players.LocalPlayer.Name or "?",
     }
     markStatsDirty()
     flushStats(true)
 
     appendRejoinLog({
-        event   = "session_start",
-        jobId   = game.JobId,
+        event = "session_start",
+        jobId = game.JobId,
         placeId = game.PlaceId,
-        at      = os.time(),
-        player  = STATS.activeSession.player,
+        at = os.time(),
+        player = STATS.activeSession.player,
     })
 end
 
 local function endSession(reason)
     if type(STATS.activeSession) == "table" then
-        STATS.activeSession.endedAt   = os.time()
+        STATS.activeSession.endedAt = os.time()
         STATS.activeSession.endReason = reason or "unknown"
     end
     markStatsDirty()
     flushStats(true)
 
     appendRejoinLog({
-        event     = "session_end",
-        jobId     = game.JobId,
-        at        = os.time(),
-        reason    = reason or "unknown",
+        event = "session_end",
+        jobId = game.JobId,
+        at = os.time(),
+        reason = reason or "unknown",
         eggsFired = STATS.eggsFired or 0,
-        rejoins   = STATS.rejoins or 0,
+        rejoins = STATS.rejoins or 0,
     })
 end
 
@@ -185,14 +185,14 @@ local function rejoin()
     if os.clock() - STATE.lastHopAt < REJOIN_COOLDOWN then return end
     if STATE.busy or #queue > 0 then return end
 
-    STATE.hopping      = true
-    STATE.lastHopAt    = os.clock()
+    STATE.hopping = true
+    STATE.lastHopAt = os.clock()
     STATE.hopStartedAt = os.clock()
 
     local fromJob = game.JobId
     print("[K] Rejoining same instance:", fromJob)
 
-    STATS.rejoins    = (STATS.rejoins or 0) + 1
+    STATS.rejoins = (STATS.rejoins or 0) + 1
     STATS.lastRejoin = os.time()
     markStatsDirty()
 
@@ -200,10 +200,10 @@ local function rejoin()
     flushStats(true)
 
     appendRejoinLog({
-        event     = "rejoin",
-        from      = fromJob,
-        to        = fromJob,
-        at        = os.time(),
+        event = "rejoin",
+        from = fromJob,
+        to = fromJob,
+        at = os.time(),
         rejoinNum = STATS.rejoins,
     })
 
@@ -219,10 +219,10 @@ local function rejoin()
     if not queued_ok then
         warn("[K] No queue_on_teleport support - script will NOT reload after rejoin")
         appendRejoinLog({
-            event  = "rejoin_failed",
+            event = "rejoin_failed",
             reason = "no_queue_on_teleport",
-            from   = fromJob,
-            at     = os.time(),
+            from = fromJob,
+            at = os.time(),
         })
         STATE.hopping = false
         return
@@ -231,17 +231,17 @@ local function rejoin()
     task.wait(REJOIN_DELAY)
 
     local success, err = pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, fromJob, Players.LocalPlayer)
+        TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
     end)
 
     if not success then
         warn("[K] Rejoin: teleport failed:", err)
         appendRejoinLog({
-            event  = "teleport_failed",
-            from   = fromJob,
-            to     = fromJob,
-            error  = tostring(err),
-            at     = os.time(),
+            event = "teleport_failed",
+            from = fromJob,
+            to = fromJob,
+            error = tostring(err),
+            at = os.time(),
         })
         STATS.rejoins = math.max(0, (STATS.rejoins or 1) - 1)
         markStatsDirty()
@@ -308,8 +308,8 @@ local function checkEmpty()
         warn("[K] Rejoin timeout, resetting rejoin state")
         appendRejoinLog({
             event = "rejoin_timeout",
-            from  = game.JobId,
-            at    = os.time(),
+            from = game.JobId,
+            at = os.time(),
         })
         STATE.hopping = false
     end

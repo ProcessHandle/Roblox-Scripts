@@ -4,6 +4,7 @@
 --  + File-based hop tracking (visited_servers.json, hop_log.json, stats.json)
 --  + Client-safe session tracking (no BindToClose)
 --  + Chain-aware hopping: never returns to the previous server
+--  + Weighted-random hopping: biased toward smaller (emptier) servers
 -- ============================================================
 
 local Players          = game:GetService("Players")
@@ -320,6 +321,31 @@ local function fetchServers()
     return nil
 end
 
+-- ---------- Weighted pick (bias toward emptier servers) ----------
+-- Each candidate's weight is 1 / (playing + 1), so an empty server is
+-- roughly 6x more likely than a 5-player one and ~20x more likely than
+-- a 20-player one, but not guaranteed -- keeps 100 bots from all
+-- slamming the same near-empty lobby.
+local function pickWeighted(list)
+    if #list == 0 then return nil end
+
+    local total = 0
+    local weights = {}
+    for i, c in ipairs(list) do
+        local w = 1 / (c.playing + 1)
+        weights[i] = w
+        total = total + w
+    end
+
+    local roll = math.random() * total
+    local acc  = 0
+    for i, w in ipairs(weights) do
+        acc = acc + w
+        if roll <= acc then return list[i] end
+    end
+    return list[#list]
+end
+
 -- ---------- Hop ----------
 local function serverHop()
     if STATE.hopping then return end
@@ -366,22 +392,30 @@ local function serverHop()
         [previousHopTo   or ""] = true,
     }
 
-    local candidates = {}
-    for _, v in ipairs(servers) do
-        if type(v) == "table"
-            and type(v.id) == "string"
-            and tonumber(v.playing) and tonumber(v.maxPlayers)
-            and v.playing < v.maxPlayers
-            and not banned[v.id]
-            and not visited[v.id]
-        then
-            table.insert(candidates, v.id)
+    -- Collect candidates as {id, playing} tables so we can weight them.
+    local function collect(allowRevisit)
+        local out = {}
+        for _, v in ipairs(servers) do
+            if type(v) == "table"
+                and type(v.id) == "string"
+                and tonumber(v.playing) and tonumber(v.maxPlayers)
+                and v.playing < v.maxPlayers
+                and not banned[v.id]
+                and (allowRevisit or not visited[v.id])
+            then
+                table.insert(out, {
+                    id      = v.id,
+                    playing = tonumber(v.playing) or 0,
+                })
+            end
         end
+        return out
     end
 
-    -- Fallback: if we've already visited every open server, prefer servers
-    -- that aren't the previous hop, then allow revisits, but never the
-    -- server we just came from.
+    local candidates = collect(false)
+
+    -- Fallback: if we've already visited every open server, trim the
+    -- visited cache and allow revisits, but still never the previous hop.
     if #candidates == 0 then
         print("[K] Hop: no fresh servers; trimming visited cache and allowing revisits")
 
@@ -399,16 +433,7 @@ local function serverHop()
             at      = os.time(),
         })
 
-        for _, v in ipairs(servers) do
-            if type(v) == "table"
-                and type(v.id) == "string"
-                and tonumber(v.playing) and tonumber(v.maxPlayers)
-                and v.playing < v.maxPlayers
-                and not banned[v.id]
-            then
-                table.insert(candidates, v.id)
-            end
-        end
+        candidates = collect(true)
     end
 
     if #candidates == 0 then
@@ -425,9 +450,13 @@ local function serverHop()
         return
     end
 
-    -- Avoid re-picking the same candidate on retry after a failure.
-    local chosen = candidates[math.random(1, #candidates)]
-    print("[K] Hop: teleporting to", chosen, "(" .. #candidates .. " candidates)")
+    -- Weighted-random pick, biased toward emptier servers.
+    local pick = pickWeighted(candidates)
+    local chosen = pick.id
+    print(string.format(
+        "[K] Hop: teleporting to %s (%d candidates, picked playing=%d)",
+        chosen, #candidates, pick.playing
+    ))
 
     -- Persist the hop edge *before* teleporting so the next session
     -- (reloaded via queue_on_teleport) inherits the chain.
@@ -451,6 +480,7 @@ local function serverHop()
         to         = chosen,
         at         = os.time(),
         candidates = #candidates,
+        playing    = pick.playing,
         hopNumber  = STATS.hops,
     })
 
